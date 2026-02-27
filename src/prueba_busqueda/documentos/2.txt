@@ -1,0 +1,4 @@
+Cuando escribís código, siempre van a aparecer errores o bugs.
+Es importante saber leer la consola para solucionar problemas.
+El debugging consiste en encontrar fallas y arreglar el script.
+Sin corregir errores, el programa no va a compilar bien.
