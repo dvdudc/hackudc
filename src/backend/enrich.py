@@ -110,7 +110,7 @@ def enrich_item(item_id: int) -> dict:
         )
 
         try:
-            with urllib.request.urlopen(req) as response:
+            with urllib.request.urlopen(req, timeout=10) as response:
                 resp_body = response.read().decode("utf-8")
                 resp_json = json.loads(resp_body)
                 raw = resp_json.get("response", "").strip()
