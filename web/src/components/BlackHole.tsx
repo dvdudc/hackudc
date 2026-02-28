@@ -4,9 +4,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 interface BlackHoleProps {
     onFileDrop: (file: File) => void;
     isProcessing: boolean;
+    onClick?: () => void;
+    isWidgetMode?: boolean;
 }
 
-export const BlackHole: React.FC<BlackHoleProps> = ({ onFileDrop, isProcessing }) => {
+export const BlackHole: React.FC<BlackHoleProps> = ({ onFileDrop, isProcessing, onClick, isWidgetMode = false }) => {
     const [isDragActive, setIsDragActive] = useState(false);
     const [droppedFile, setDroppedFile] = useState<File | null>(null);
     const [isSpaghettifying, setIsSpaghettifying] = useState(false);
@@ -49,14 +51,15 @@ export const BlackHole: React.FC<BlackHoleProps> = ({ onFileDrop, isProcessing }
     }, [onFileDrop]);
 
     return (
-        <div className="relative flex items-center justify-center w-full h-96">
+        <div className={`relative flex items-center justify-center w-full ${isWidgetMode ? 'h-full' : 'h-96'}`}>
             {/* Event Horizon container acting as drop zone */}
             <motion.div
                 onDragEnter={handleDragEnter}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
-                className="relative flex items-center justify-center w-full h-full cursor-pointer z-10"
+                onClick={onClick}
+                className={`relative flex items-center justify-center w-full h-full z-10 ${onClick ? 'cursor-pointer' : ''}`}
             >
                 {/* Accretion Disk / Outer Glow */}
                 <motion.div
@@ -70,12 +73,12 @@ export const BlackHole: React.FC<BlackHoleProps> = ({ onFileDrop, isProcessing }
                         rotate: { repeat: Infinity, duration: isProcessing ? 3 : 20, ease: "linear" },
                         opacity: { repeat: Infinity, duration: isProcessing ? 1.5 : 4, ease: "easeInOut" }
                     }}
-                    className="absolute rounded-full w-64 h-64 border border-white/20"
+                    className={`absolute rounded-full border border-white/20 ${isWidgetMode ? 'w-24 h-24' : 'w-64 h-64'}`}
                     style={{
                         background: 'radial-gradient(circle, rgba(0,0,0,0) 30%, rgba(255,255,255,0.08) 60%, rgba(0,0,0,0) 80%)',
                         boxShadow: isProcessing
                             ? '0 0 120px 30px rgba(255,255,255,0.2)'
-                            : '0 0 80px 15px rgba(255,255,255,0.05)'
+                            : (isWidgetMode ? '0 0 30px 5px rgba(255,255,255,0.05)' : '0 0 80px 15px rgba(255,255,255,0.05)')
                     }}
                 />
 
@@ -89,7 +92,7 @@ export const BlackHole: React.FC<BlackHoleProps> = ({ onFileDrop, isProcessing }
                         duration: isProcessing ? 0.5 : 3,
                         ease: "easeInOut"
                     }}
-                    className="absolute bg-black rounded-full w-40 h-40 shadow-[inset_0_0_20px_rgba(0,0,0,1)] border border-white/5"
+                    className={`absolute bg-black rounded-full shadow-[inset_0_0_20px_rgba(0,0,0,1)] border border-white/5 ${isWidgetMode ? 'w-16 h-16' : 'w-40 h-40'}`}
                     style={{
                         boxShadow: '0 0 40px -10px rgba(255,255,255,0.1)'
                     }}
@@ -111,7 +114,7 @@ export const BlackHole: React.FC<BlackHoleProps> = ({ onFileDrop, isProcessing }
                                 duration: 1.5,
                                 ease: [0.25, 1, 0.5, 1] // Custom cubic bezier for a "sucked in" snap
                             }}
-                            className="absolute bg-white/90 text-black py-2 px-6 rounded font-bold tracking-widest text-sm border-2 border-white overflow-hidden flex items-center justify-center whitespace-nowrap shadow-[0_0_30px_rgba(255,255,255,0.8)]"
+                            className="absolute bg-white/90 text-black py-1 px-3 md:py-2 md:px-6 rounded font-bold tracking-widest text-xs md:text-sm border flex items-center justify-center whitespace-nowrap shadow-[0_0_30px_rgba(255,255,255,0.8)]"
                         >
                             {droppedFile.name}
                         </motion.div>
