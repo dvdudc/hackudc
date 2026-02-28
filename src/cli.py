@@ -53,7 +53,21 @@ def ingest(
 
     try:
         logging.info(f"Ingesting file: {filepath}")
-        item_id = ingest_file(str(filepath))
+        
+        import mimetypes
+        mime, _ = mimetypes.guess_type(str(filepath))
+        mime = mime or "application/octet-stream"
+        
+        if mime.startswith("image/"):
+            from backend.ocr import extract_text_from_image
+            parsed_text = extract_text_from_image(str(filepath))
+        else:
+            try:
+                parsed_text = filepath.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                raise ValueError("File encoding error. Must be UTF-8.")
+                
+        item_id = ingest_file(str(filepath), parsed_text)
         logging.info(f"Successfully ingested item #{item_id}")
         console.print(
             Panel(
