@@ -1,0 +1,11 @@
+2026-02-28 04:34:01,060 - root - INFO - Listing all items in the vault
+2026-02-28 04:34:01,674 - root - INFO - === File logging stopped ===
+2026-02-28 04:36:32,778 - numexpr.utils - INFO - NumExpr defaulting to 16 threads.
+2026-02-28 04:36:35,190 - root - INFO - Ingesting file: /home/hulio/HackUDC26/hackudc/src/ejemplo_palabra.txt
+2026-02-28 04:36:35,724 - httpx - INFO - HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:batchEmbedContents "HTTP/1.1 200 OK"
+2026-02-28 04:36:35,970 - google_genai.models - INFO - AFC is enabled with max remote calls: 10.
+2026-02-28 04:36:37,672 - httpx - INFO - HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent "HTTP/1.1 200 OK"
+2026-02-28 04:36:37,763 - root - INFO - Successfully ingested item #7
+2026-02-28 04:36:58,535 - root - INFO - === File logging stopped ===
+2026-02-28 04:37:18,198 - root - INFO - === File logging stopped ===
+2026-02-28 04:51:08,166 - root - INFO - === File logging stopped ===
