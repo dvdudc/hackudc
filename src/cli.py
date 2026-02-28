@@ -279,7 +279,7 @@ def main(
 
     # Base logging setup for console (if verbose) or general info
     logging.basicConfig(
-        level=logging.DEBUG if verbose else logging.INFO,
+        level=logging.DEBUG if verbose else logging.WARNING,
         format="%(message)s",
         datefmt="[%X]",
         handlers=[RichHandler(rich_tracebacks=True, console=console)],
