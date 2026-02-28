@@ -1,9 +1,11 @@
 duckdb>=1.2.0
 google-genai
-
 langchain-text-splitters
 python-dotenv
 typer[all]
 numpy
 rich
 pytest
+fastapi
+uvicorn
+python-multipart
