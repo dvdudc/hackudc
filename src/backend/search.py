@@ -31,31 +31,49 @@ def search(query: str, limit: int = 10) -> list[dict]:
         if item_id not in semantic or score > semantic[item_id]["sem_score"]:
             semantic[item_id] = {"snippet": snippet, "sem_score": score}
 
-    # 2. Lexical Search
+    # ── 3. Lexical search (TF-IDF / BM25) ────────────────────────────
     lexical: dict[int, dict] = {}
-    words = [w.strip() for w in query.split() if len(w.strip()) > 2]
-    if words:
-        like_clauses = " OR ".join(["body ILIKE ?" for _ in words])
-        like_params = [f"%{w}%" for w in words]
+    
+    # Use DuckDB FTS extension for true TF-IDF / BM25
+    try:
         lex_rows = con.execute(
-            f"SELECT c.item_id, c.body AS snippet FROM content c WHERE {like_clauses} LIMIT ?;",
-            like_params + [limit * 2],
+            """
+            SELECT item_id, body AS snippet, fts_main_content.match_bm25(id, ?) AS lex_score
+            FROM content
+            WHERE fts_main_content.match_bm25(id, ?) IS NOT NULL
+            ORDER BY lex_score DESC
+            LIMIT ?;
+            """,
+            [query, query, limit * 2],
         ).fetchall()
-        for item_id, snippet in lex_rows:
-            if item_id not in lexical:
-                lexical[item_id] = {"snippet": snippet, "lex_score": 1.0}
+
+        for item_id, snippet, lex_score in lex_rows:
+            if item_id not in lexical or lex_score > lexical[item_id]["lex_score"]:
+                lexical[item_id] = {"snippet": snippet, "lex_score": lex_score}
+    except Exception as e:
+        print(f"FTS Search failed: {e}")
 
     # 3. Merge & Rank
     all_ids = set(semantic.keys()) | set(lexical.keys())
     results = []
 
+    max_lex = max([v["lex_score"] for v in lexical.values()]) if lexical else 1.0
+
     for item_id in all_ids:
         sem = semantic.get(item_id, {}).get("sem_score", 0.0)
-        lex = 1.0 if item_id in lexical else 0.0
-        combined = 0.7 * sem + 0.3 * lex
+        raw_lex = lexical.get(item_id, {}).get("lex_score", 0.0)
         
-        snippet = semantic.get(item_id, {}).get("snippet") or lexical.get(item_id, {}).get("snippet", "")
-        
+        # Normalize BM25 score to 0..1 scale roughly
+        norm_lex = (raw_lex / max_lex) if max_lex > 0 else 0.0
+
+        # Weighted combination: 70 % semantic, 30 % lexical
+        combined = 0.7 * sem + 0.3 * norm_lex
+
+        snippet = (
+            semantic.get(item_id, {}).get("snippet")
+            or lexical.get(item_id, {}).get("snippet", "")
+        )
+
         results.append({
             "item_id": item_id,
             "snippet": snippet[:200],

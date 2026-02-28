@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import hashlib
 import mimetypes
+import os
 from pathlib import Path
+import time
+import logging
 from google import genai
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -22,18 +25,11 @@ class DuplicateError(Exception):
         super().__init__(message)
         self.existing_id = existing_id
 
-_client: genai.Client | None = None
-
-
-def _genai() -> genai.Client:
-    global _client
-    if _client is None:
-        _client = genai.Client(api_key=GEMINI_API_KEY)
-    return _client
+from backend.llm import get_client
 
 
 def get_embedding(text: str) -> list[float]:
-    result = _genai().models.embed_content(
+    result = get_client().models.embed_content(
         model=EMBEDDING_MODEL,
         contents=text,
     )
@@ -43,7 +39,7 @@ def get_embedding(text: str) -> list[float]:
 def get_embeddings_batch(texts: list[str]) -> list[list[float]]:
     if not texts:
         return []
-    result = _genai().models.embed_content(
+    result = get_client().models.embed_content(
         model=EMBEDDING_MODEL,
         contents=texts,
     )
@@ -66,6 +62,7 @@ def calculate_md5(path: Path) -> str:
 
 
 def ingest_file(path: str) -> int:
+    start_time = time.time()
     filepath = Path(path).resolve()
     if not filepath.exists():
         raise FileNotFoundError(f"File not found: {filepath}")
@@ -112,19 +109,17 @@ def ingest_file(path: str) -> int:
     print("🧠 Generating embeddings...")
     vectors = get_embeddings_batch(chunks)
 
-    # 7. Store
-    item_id = db.insert_item(
-        source_path=str(filepath), 
-        source_type="text",
-        file_hash=file_hash
-    )
+    # ── 5. Store ─────────────────────────────────────────────────────
+    mtime = os.path.getmtime(str(filepath))
+    item_id = db.insert_item(source_path=str(filepath), source_type="text", file_hash=file_hash, file_mtime=mtime)
 
     for i, (chunk, vec) in enumerate(zip(chunks, vectors)):
         content_id = db.insert_content(item_id=item_id, chunk_index=i, body=chunk)
         db.insert_embedding(content_id=content_id, item_id=item_id, vector=vec)
 
+    # Rebuild indexes after inserting new data
     db.create_hnsw_index()
-    print(f"✅ Stored as Item #{item_id}")
+    db.create_fts_index()
 
     # 8. Enrichment & Connections
     from backend.enrich import enrich_item
@@ -133,5 +128,9 @@ def ingest_file(path: str) -> int:
     print("🤖 Running AI enrichment & connection finding...")
     enrich_item(item_id)
     find_connections(item_id)
+
+    elapsed_time = time.time() - start_time
+    print(f"⏱️  Ingestion finished in {elapsed_time:.2f} seconds.")
+    logging.info(f"Ingested {filepath.name} in {elapsed_time:.2f} seconds.")
 
     return item_id
