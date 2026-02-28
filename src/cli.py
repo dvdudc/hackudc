@@ -40,60 +40,101 @@ console = Console()
 
 @app.command()
 def ingest(
-    file: str = typer.Argument(..., help="Path to a text file to ingest."),
+    files: list[str] = typer.Argument(..., help="Path(s) to text file(s) to ingest."),
 ):
-    """Ingest a text file into the vault."""
-    # MODIFICA ESTA LÍNEA PARA IMPORTAR TAMBIÉN DuplicateError
-    from backend.ingest import ingest_file, DuplicateError 
+    """Ingest one or more text files into the vault."""
+    from backend.ingest import ingest_file, DuplicateError, get_ingest_queue
 
-    filepath = Path(file).resolve()
-    if not filepath.exists():
-        console.print(f"[red]❌ File not found:[/red] {filepath}")
+    # Resolve and validate all paths first
+    resolved: list[Path] = []
+    for f in files:
+        fp = Path(f).resolve()
+        if not fp.exists():
+            console.print(f"[red]❌ File not found:[/red] {fp}")
+            continue
+        resolved.append(fp)
+
+    if not resolved:
+        console.print("[red]❌ No valid files to ingest.[/red]")
         raise typer.Exit(code=1)
 
-    try:
-        logging.info(f"Ingesting file: {filepath}")
-        
-        import mimetypes
-        mime, _ = mimetypes.guess_type(str(filepath))
-        mime = mime or "application/octet-stream"
-        
-        if mime.startswith("image/"):
-            from backend.ocr import extract_text_from_image
-            parsed_text = extract_text_from_image(str(filepath))
+    # Single file — direct (backward-compatible behaviour)
+    if len(resolved) == 1:
+        filepath = resolved[0]
+        try:
+            logging.info(f"Ingesting file: {filepath}")
+            
+            import mimetypes
+            mime, _ = mimetypes.guess_type(str(filepath))
+            mime = mime or "application/octet-stream"
+            
+            if mime.startswith("image/"):
+                from backend.ocr import extract_text_from_image
+                parsed_text = extract_text_from_image(str(filepath))
+            else:
+                try:
+                    parsed_text = filepath.read_text(encoding="utf-8")
+                except UnicodeDecodeError:
+                    raise ValueError("File encoding error. Must be UTF-8.")
+                    
+            item_id = ingest_file(str(filepath), parsed_text=parsed_text)
+            logging.info(f"Successfully ingested item #{item_id}")
+            console.print(
+                Panel(
+                    f"[green]Item #{item_id}[/green] stored successfully.\n"
+                    f"Source: {filepath}",
+                    title="✅ Ingested",
+                    border_style="green",
+                )
+            )
+        except DuplicateError as e:
+            console.print(
+                Panel(
+                    f"[yellow]Item #{e.existing_id}[/yellow] already exists.\n"
+                    f"Skipping ingestion to save resources.\n"
+                    f"Source: {filepath}",
+                    title="⚠️  Duplicate Detected",
+                    border_style="yellow",
+                )
+            )
+        except ValueError as e:
+            console.print(f"[red]❌ {e}[/red]")
+            raise typer.Exit(code=1)
+        return
+
+    # Multiple files — parallel via IngestQueue
+    console.print(f"[bold]📦 Queuing {len(resolved)} file(s) for parallel ingestion...[/bold]\n")
+    queue = get_ingest_queue()
+    queue.submit_batch([str(fp) for fp in resolved])
+    results = queue.drain()
+
+    # Summary table
+    table = Table(title="📊 Ingestion Summary", show_lines=True)
+    table.add_column("#", style="dim", width=4)
+    table.add_column("File", style="bold")
+    table.add_column("Status")
+    table.add_column("ID", width=6)
+
+    ingested = duplicates = errors = 0
+    for i, r in enumerate(results, 1):
+        name = Path(r.path).name
+        if r.is_duplicate:
+            duplicates += 1
+            table.add_row(str(i), name, "[yellow]⚠️  Duplicate[/yellow]", str(r.duplicate_id))
+        elif r.success:
+            ingested += 1
+            table.add_row(str(i), name, "[green]✅ OK[/green]", str(r.item_id))
         else:
-            try:
-                parsed_text = filepath.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                raise ValueError("File encoding error. Must be UTF-8.")
-                
-        item_id = ingest_file(str(filepath), parsed_text)
-        logging.info(f"Successfully ingested item #{item_id}")
-        console.print(
-            Panel(
-                f"[green]Item #{item_id}[/green] stored successfully.\n"
-                f"Source: {filepath}",
-                title="✅ Ingested",
-                border_style="green",
-            )
-        )
-        
-    except DuplicateError as e:
-        # Ahora sí funcionará este bloque
-        console.print(
-            Panel(
-                f"[yellow]Item #{e.existing_id}[/yellow] already exists.\n"
-                f"Skipping ingestion to save resources.\n"
-                f"Source: {filepath}",
-                title="⚠️  Duplicate Detected",
-                border_style="yellow",
-            )
-        )
-        # No hacemos exit(1) para no marcarlo como error fatal
-        
-    except ValueError as e:
-        console.print(f"[red]❌ {e}[/red]")
-        raise typer.Exit(code=1)
+            errors += 1
+            table.add_row(str(i), name, f"[red]❌ {r.error}[/red]", "—")
+
+    console.print(table)
+    console.print(
+        f"\n[bold]Total:[/bold] {len(results)} | "
+        f"[green]Ingested:[/green] {ingested} | "
+        f"[yellow]Duplicates:[/yellow] {duplicates} | "
+        f"[red]Errors:[/red] {errors}"
+    )
 
 
 @app.command()

@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 import tempfile
 
-from backend.ingest import ingest_file, DuplicateError
+from backend.ingest import ingest_file, DuplicateError, get_ingest_queue, IngestResult
 from backend.search import search as search_docs
 from backend.db import get_item, get_chunks_for_item
 from backend.connections import get_connections
@@ -39,6 +39,19 @@ class IngestResponse(BaseModel):
     success: bool
     message: str
     documentId: str
+
+class BatchIngestItemResponse(BaseModel):
+    filename: str
+    success: bool
+    message: str
+    documentId: Optional[str] = None
+
+class BatchIngestResponse(BaseModel):
+    total: int
+    ingested: int
+    duplicates: int
+    errors: int
+    results: List[BatchIngestItemResponse]
 
 @app.get("/search", response_model=List[DocumentResult])
 def api_search(q: str):
@@ -100,6 +113,63 @@ def api_ingest(file: UploadFile = File(...)):
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
+
+
+@app.post("/ingest/batch", response_model=BatchIngestResponse)
+def api_ingest_batch(files: List[UploadFile] = File(...)):
+    """Ingest multiple files in parallel using the IngestQueue."""
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided.")
+
+    # Save all uploaded files to temp paths
+    temp_paths: list[tuple[str, str]] = []  # (temp_path, original_filename)
+    for uploaded in files:
+        fd, temp_path = tempfile.mkstemp(suffix=f"_{uploaded.filename}")
+        with os.fdopen(fd, 'wb') as f:
+            shutil.copyfileobj(uploaded.file, f)
+        temp_paths.append((temp_path, uploaded.filename or "unknown"))
+
+    try:
+        # Submit all to the queue and drain
+        queue = get_ingest_queue()
+        queue.submit_batch([tp for tp, _ in temp_paths])
+        results = queue.drain()
+
+        # Build response
+        item_responses: list[BatchIngestItemResponse] = []
+        ingested = duplicates = errors = 0
+
+        for (_, orig_name), r in zip(temp_paths, results):
+            if r.is_duplicate:
+                duplicates += 1
+                item_responses.append(BatchIngestItemResponse(
+                    filename=orig_name, success=True,
+                    message="Document already exists.",
+                    documentId=str(r.duplicate_id),
+                ))
+            elif r.success:
+                ingested += 1
+                item_responses.append(BatchIngestItemResponse(
+                    filename=orig_name, success=True,
+                    message="Document successfully ingested.",
+                    documentId=str(r.item_id),
+                ))
+            else:
+                errors += 1
+                item_responses.append(BatchIngestItemResponse(
+                    filename=orig_name, success=False,
+                    message=r.error or "Unknown error.",
+                ))
+
+        return BatchIngestResponse(
+            total=len(files),
+            ingested=ingested, duplicates=duplicates, errors=errors,
+            results=item_responses,
+        )
+    finally:
+        for tp, _ in temp_paths:
+            if os.path.exists(tp):
+                os.remove(tp)
 
 @app.get("/document/{doc_id}", response_model=DocumentDetail)
 def api_get_document(doc_id: str):
