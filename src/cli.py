@@ -12,6 +12,7 @@ Usage:
 """
 
 from __future__ import annotations
+#from backend/ingest import DuplicateError
 
 import json
 import csv
@@ -42,7 +43,8 @@ def ingest(
     file: str = typer.Argument(..., help="Path to a text file to ingest."),
 ):
     """Ingest a text file into the vault."""
-    from backend.ingest import ingest_file
+    # MODIFICA ESTA LÍNEA PARA IMPORTAR TAMBIÉN DuplicateError
+    from backend.ingest import ingest_file, DuplicateError 
 
     filepath = Path(file).resolve()
     if not filepath.exists():
@@ -61,6 +63,20 @@ def ingest(
                 border_style="green",
             )
         )
+        
+    except DuplicateError as e:
+        # Ahora sí funcionará este bloque
+        console.print(
+            Panel(
+                f"[yellow]Item #{e.existing_id}[/yellow] already exists.\n"
+                f"Skipping ingestion to save resources.\n"
+                f"Source: {filepath}",
+                title="⚠️  Duplicate Detected",
+                border_style="yellow",
+            )
+        )
+        # No hacemos exit(1) para no marcarlo como error fatal
+        
     except ValueError as e:
         console.print(f"[red]❌ {e}[/red]")
         raise typer.Exit(code=1)

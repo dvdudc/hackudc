@@ -18,8 +18,15 @@ def get_connection() -> duckdb.DuckDBPyConnection:
     """Return (or create) the DuckDB connection and ensure VSS is loaded."""
     global _con
     if _con is None:
+        Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+        
         _con = duckdb.connect(DB_PATH)
-        _con.execute("INSTALL vss; LOAD vss;")
+        try:
+            _con.execute("INSTALL vss;")
+            _con.execute("LOAD vss;")
+        except Exception:
+            pass
+        
         _con.execute("SET hnsw_enable_experimental_persistence = true;")
         init_schema(_con)
     return _con
@@ -42,11 +49,13 @@ def init_schema(con: duckdb.DuckDBPyConnection) -> None:
     con.execute("CREATE SEQUENCE IF NOT EXISTS content_seq START 1;")
     con.execute("CREATE SEQUENCE IF NOT EXISTS emb_seq START 1;")
 
+    # MODIFICADO: Se añade file_hash
     con.execute(f"""
         CREATE TABLE IF NOT EXISTS items (
             id          INTEGER PRIMARY KEY DEFAULT nextval('item_seq'),
             source_path TEXT,
             source_type TEXT DEFAULT 'text',
+            file_hash   TEXT,
             title       TEXT,
             tags        TEXT,
             summary     TEXT,
@@ -84,7 +93,7 @@ def init_schema(con: duckdb.DuckDBPyConnection) -> None:
 
 
 def create_hnsw_index(con: duckdb.DuckDBPyConnection | None = None) -> None:
-    """Create the HNSW index on embeddings. Safe to call multiple times."""
+    """Create the HNSW index on embeddings."""
     if con is None:
         con = get_connection()
     try:
@@ -93,17 +102,32 @@ def create_hnsw_index(con: duckdb.DuckDBPyConnection | None = None) -> None:
             "ON embeddings USING HNSW(vector) WITH (metric = 'cosine');"
         )
     except duckdb.CatalogException:
-        pass  # index already exists
+        pass
 
 
 # ── CRUD helpers ─────────────────────────────────────────────────────
 
-def insert_item(source_path: str, source_type: str = "text") -> int:
+def get_item_by_hash(file_hash: str) -> dict | None:
+    """Check if an item with this MD5 hash already exists."""
+    con = get_connection()
+    row = con.execute(
+        "SELECT id, source_path FROM items WHERE file_hash = ?;", 
+        [file_hash]
+    ).fetchone()
+    
+    if row is None:
+        return None
+    
+    cols = [d[0] for d in con.description]
+    return dict(zip(cols, row))
+
+
+def insert_item(source_path: str, source_type: str = "text", file_hash: str = None) -> int:
     """Insert a new item and return its id."""
     con = get_connection()
     result = con.execute(
-        "INSERT INTO items (source_path, source_type) VALUES (?, ?) RETURNING id;",
-        [source_path, source_type],
+        "INSERT INTO items (source_path, source_type, file_hash) VALUES (?, ?, ?) RETURNING id;",
+        [source_path, source_type, file_hash],
     ).fetchone()
     return result[0]
 
@@ -131,7 +155,6 @@ def insert_embedding(content_id: int, item_id: int, vector: list[float]) -> int:
 def insert_connection(item_a: int, item_b: int, score: float) -> None:
     """Insert or update a connection between two items."""
     con = get_connection()
-    # Ensure item_a < item_b for consistency
     a, b = min(item_a, item_b), max(item_a, item_b)
     con.execute(
         """
@@ -170,7 +193,7 @@ def get_all_items() -> list[dict]:
 
 
 def get_chunks_for_item(item_id: int) -> list[dict]:
-    """Return all text chunks for an item, ordered by chunk_index."""
+    """Return all text chunks for an item."""
     con = get_connection()
     rows = con.execute(
         "SELECT * FROM content WHERE item_id = ? ORDER BY chunk_index;",
