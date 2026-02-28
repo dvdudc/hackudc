@@ -3,7 +3,7 @@ import time
 from pathlib import Path
 
 # Add src to python path for imports
-sys.path.append(str(Path(__file__).parent.parent))
+sys.path.append(str(Path(__file__).resolve().parent.parent / "src"))
 
 from backend.search import search as baseline_search
 from backend import db
