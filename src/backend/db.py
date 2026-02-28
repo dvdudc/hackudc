@@ -61,6 +61,12 @@ def init_schema(con: duckdb.DuckDBPyConnection) -> None:
         );
     """)
 
+    # Migración: Si la tabla ya existía sin file_hash, la añadimos.
+    try:
+        con.execute("ALTER TABLE items ADD COLUMN file_hash TEXT;")
+    except Exception:
+        pass
+
     con.execute(f"""
         CREATE TABLE IF NOT EXISTS content (
             id          INTEGER PRIMARY KEY DEFAULT nextval('content_seq'),
@@ -135,20 +141,29 @@ def create_fts_index(con: duckdb.DuckDBPyConnection | None = None) -> None:
 
 # ── CRUD helpers ─────────────────────────────────────────────────────
 
-def insert_item(source_path: str, source_type: str = "text", file_mtime: float = None) -> int:
+def insert_item(source_path: str, source_type: str = "text", file_hash: str = None, file_mtime: float = None) -> int:
     """Insert a new item and return its id."""
     con = get_connection()
     if file_mtime is not None:
         result = con.execute(
-            "INSERT INTO items (source_path, source_type, file_mtime) VALUES (?, ?, to_timestamp(?)) RETURNING id;",
-            [source_path, source_type, file_mtime],
+            "INSERT INTO items (source_path, source_type, file_hash, file_mtime) VALUES (?, ?, ?, to_timestamp(?)) RETURNING id;",
+            [source_path, source_type, file_hash, file_mtime],
         ).fetchone()
     else:
         result = con.execute(
-            "INSERT INTO items (source_path, source_type) VALUES (?, ?) RETURNING id;",
-            [source_path, source_type],
+            "INSERT INTO items (source_path, source_type, file_hash) VALUES (?, ?, ?) RETURNING id;",
+            [source_path, source_type, file_hash],
         ).fetchone()
     return result[0]
+
+
+def get_item_by_hash(file_hash: str) -> dict | None:
+    """Fetch a single item by its hash."""
+    con = get_connection()
+    row = con.execute("SELECT * FROM items WHERE file_hash = ?;", [file_hash]).fetchone()
+    if row is None:
+        return None
+    return _row_to_dict(con, row)
 
 
 def insert_content(item_id: int, chunk_index: int, body: str) -> int:
@@ -222,22 +237,36 @@ def update_item_enrichment(item_id: int, title: str, tags: str, summary: str) ->
     )
 
 
+def _row_to_dict(cursor, row: tuple) -> dict:
+    """Convert a single duckdb row to a dict using cursor description."""
+    if row is None:
+        return {}
+    cols = [d[0] for d in cursor.description]
+    return dict(zip(cols, row))
+
+
+def _rows_to_dicts(cursor, rows: list[tuple]) -> list[dict]:
+    """Convert multiple duckdb rows to a list of dicts using cursor description."""
+    if not rows:
+        return []
+    cols = [d[0] for d in cursor.description]
+    return [dict(zip(cols, r)) for r in rows]
+
+
 def get_item(item_id: int) -> dict | None:
     """Fetch a single item by id."""
     con = get_connection()
     row = con.execute("SELECT * FROM items WHERE id = ?;", [item_id]).fetchone()
     if row is None:
         return None
-    cols = [d[0] for d in con.description]
-    return dict(zip(cols, row))
+    return _row_to_dict(con, row)
 
 
 def get_all_items() -> list[dict]:
     """List all items."""
     con = get_connection()
     rows = con.execute("SELECT * FROM items ORDER BY created_at DESC;").fetchall()
-    cols = [d[0] for d in con.description]
-    return [dict(zip(cols, r)) for r in rows]
+    return _rows_to_dicts(con, rows)
 
 
 def get_chunks_for_item(item_id: int) -> list[dict]:
@@ -253,8 +282,7 @@ def get_chunks_for_item(item_id: int) -> list[dict]:
         """,
         [item_id],
     ).fetchall()
-    cols = [d[0] for d in con.description]
-    return [dict(zip(cols, r)) for r in rows]
+    return _rows_to_dicts(con, rows)
 
 
 def get_embeddings_for_item(item_id: int) -> list[list[float]]:

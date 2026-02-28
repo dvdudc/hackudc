@@ -12,7 +12,7 @@ from backend.config import GEMINI_API_KEY, LLM_MODEL
 from backend import db
 
 
-_client: genai.Client | None = None
+from backend.llm import get_client
 
 
 ENRICHMENT_PROMPT = """
@@ -71,11 +71,7 @@ SIN texto adicional, SIN explicaciones. Solo el JSON. Puedes usar valid JSON cod
 """
 
 
-def _genai() -> genai.Client:
-    global _client
-    if _client is None:
-        _client = genai.Client(api_key=GEMINI_API_KEY)
-    return _client
+
 
 
 def enrich_item(item_id: int) -> dict:
@@ -106,7 +102,7 @@ def enrich_item(item_id: int) -> dict:
         )
         
         try:
-            resp = _genai().models.generate_content(
+            resp = get_client().models.generate_content(
                 model=LLM_MODEL,
                 contents=prompt,
             )
