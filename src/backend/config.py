@@ -20,7 +20,8 @@ DB_PATH: str = os.getenv("BLACK_VAULT_DB", "black_vault.duckdb")
 # ── Models ───────────────────────────────────────────────────────────
 EMBEDDING_MODEL: str = "gemini-embedding-001"
 EMBEDDING_DIM: int = 3072  # dimensión por defecto de gemini-embedding-001
-LLM_MODEL: str = "gemini-2.5-flash"
+LLM_MODEL: str = os.getenv("LLM_MODEL", "llama3.2")
+OLLAMA_HOST: str = os.getenv("OLLAMA_HOST", "10.8.0.3:11434")
 
 # ── Chunking ─────────────────────────────────────────────────────────
 CHUNK_SIZE: int = 500

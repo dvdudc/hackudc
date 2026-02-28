@@ -1,19 +1,16 @@
 """
 Black Vault — Enrichment module.
-Uses Gemini Flash to generate title, tags, and summary for an item.
+Uses a self-hosted Ollama instance to generate title, tags, and summary for an item.
 """
 
 from __future__ import annotations
 
 import json
-from google import genai
+import urllib.request
+import urllib.error
 
-from backend.config import GEMINI_API_KEY, LLM_MODEL
+from backend.config import LLM_MODEL, OLLAMA_HOST
 from backend import db
-
-
-from backend.llm import get_client
-
 
 ENRICHMENT_PROMPT = """
 Eres un analizador semántico especializado en sistemas RAG (Retrieval-Augmented Generation).
@@ -70,14 +67,10 @@ SIN texto adicional, SIN explicaciones. Solo el JSON. Puedes usar valid JSON cod
 ```
 """
 
-
-
-
-
 def enrich_item(item_id: int) -> dict:
     """
     Generate title, tags, and summary for an item by evaluating every chunk
-    and aggregating its metadata via ENRICHMENT_PROMPT.
+    and aggregating its metadata via ENRICHMENT_PROMPT, using Ollama.
     """
     chunks = db.get_chunks_for_item(item_id)
     if not chunks:
@@ -90,6 +83,8 @@ def enrich_item(item_id: int) -> dict:
     all_tags = []
     chunk_titles = []
     
+    url = f"http://{OLLAMA_HOST}/api/generate"
+
     # Process each chunk
     for i, chunk in enumerate(chunks):
         chunk_word_count = len(chunk["body"].split())
@@ -101,13 +96,24 @@ def enrich_item(item_id: int) -> dict:
             chunk_text=chunk["body"]
         )
         
-        try:
-            resp = get_client().models.generate_content(
-                model=LLM_MODEL,
-                contents=prompt,
-            )
+        payload = {
+            "model": LLM_MODEL,
+            "prompt": prompt,
+            "stream": False,
+            "format": "json"
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url, 
+            data=data, 
+            headers={"Content-Type": "application/json"}
+        )
 
-            raw = resp.text.strip()
+        try:
+            with urllib.request.urlopen(req) as response:
+                resp_body = response.read().decode("utf-8")
+                resp_json = json.loads(resp_body)
+                raw = resp_json.get("response", "").strip()
             
             # Parse JSON (handle potential markdown code fences)
             if "```json" in raw:
@@ -130,6 +136,9 @@ def enrich_item(item_id: int) -> dict:
                 
             print(f" ✨ Chunk {i+1}/{total_chunks} enriched: {data.get('titulo')}")
 
+        except urllib.error.URLError as e:
+            print(f"⚠️  Failed to connect to Ollama at {url}: {e}")
+            break
         except Exception as e:
             print(f"⚠️  Enrichment failed for item #{item_id} chunk #{i+1}: {e}")
 
