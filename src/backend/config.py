@@ -1,0 +1,30 @@
+"""
+Black Vault — Configuration module.
+Loads settings from environment variables / .env file.
+"""
+
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load .env from the project root (src/)
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(_env_path)
+
+# ── API ──────────────────────────────────────────────────────────────
+GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+
+# ── Database ─────────────────────────────────────────────────────────
+DB_PATH: str = os.getenv("BLACK_VAULT_DB", "black_vault.duckdb")
+
+# ── Models ───────────────────────────────────────────────────────────
+EMBEDDING_MODEL: str = "gemini-embedding-001"
+EMBEDDING_DIM: int = 3072  # dimensión por defecto de gemini-embedding-001
+LLM_MODEL: str = "gemini-2.5-flash"
+
+# ── Chunking ─────────────────────────────────────────────────────────
+CHUNK_SIZE: int = 500
+CHUNK_OVERLAP: int = 100
+
+# ── Connections ──────────────────────────────────────────────────────
+CONNECTION_THRESHOLD: float = 0.75
