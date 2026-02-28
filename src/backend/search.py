@@ -3,6 +3,8 @@ Black Vault — Search module.
 Hybrid search: Semantic (Vector) + Lexical (ILIKE).
 """
 from __future__ import annotations
+import time
+import concurrent.futures
 
 import json
 import urllib.request
@@ -68,36 +70,105 @@ def search(query: str, limit: int = 10, use_enrichment: bool = True) -> list[dic
         # Basic SQL injection mitigation for our MVP
         if ";" in sql_filter or "DROP" in sql_filter.upper():
             sql_filter = "1=1"
-        
-    query_vec = get_embedding(expanded_query)
+            
+    # 1. Start Vector Embedding generation and Lexical Search in parallel
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        future_emb = executor.submit(get_embedding, expanded_query)
 
-    # 1. Semantic Search
+        def run_lexical():
+            cursor = con.cursor()
+            safe_query = expanded_query.replace("'", "''")
+            
+            if sql_filter.strip() == "1=1":
+                return cursor.execute(
+                    f"""
+                    SELECT item_id, body AS snippet, fts_main_content.match_bm25(id, '{safe_query}') AS lex_score
+                    FROM content
+                    WHERE lex_score IS NOT NULL
+                    ORDER BY lex_score DESC
+                    LIMIT ?;
+                    """,
+                    [limit * 2],
+                ).fetchall()
+            else:
+                return cursor.execute(
+                    f"""
+                    SELECT c.item_id, c.body AS snippet, fts_main_content.match_bm25(c.id, '{safe_query}') AS lex_score
+                    FROM content c
+                    JOIN items i ON i.id = c.item_id
+                    WHERE fts_main_content.match_bm25(c.id, '{safe_query}') IS NOT NULL
+                      AND {sql_filter}
+                    ORDER BY lex_score DESC
+                    LIMIT ?;
+                    """,
+                    [limit * 2],
+                ).fetchall()
+
+        future_lex = executor.submit(run_lexical)
+        query_vec = future_emb.result()
+        try:
+            lex_rows = future_lex.result()
+        except Exception as e:
+            print(f"FTS Search failed: {e}")
+            lex_rows = []
+
+    # 2. Semantic Search
+    cursor = con.cursor()
+    
+    # Force HNSW Index usage by injecting the exact floats into the string
+    vector_str = "[" + ", ".join(map(str, query_vec)) + "]"
+    
     try:
-        semantic_rows = con.execute(
-            f"""
-            SELECT e.item_id, c.body AS snippet,
-                   array_cosine_similarity(e.vector, ?::FLOAT[{EMBEDDING_DIM}]) AS sem_score
-            FROM embeddings e
-            JOIN content c ON c.id = e.content_id
-            JOIN items i ON i.id = e.item_id
-            WHERE {sql_filter}
-            ORDER BY sem_score DESC
-            LIMIT ?;
-            """,
-            [query_vec, limit * 2],
-        ).fetchall()
+        if sql_filter.strip() == "1=1":
+            # Fast Path: No user filters, push immediately to pure HNSW Index Scan
+            semantic_rows = cursor.execute(
+                f"""
+                WITH top_embeddings AS (
+                    SELECT item_id, content_id, array_cosine_distance(vector, {vector_str}::FLOAT[{EMBEDDING_DIM}]) AS dist
+                    FROM embeddings
+                    ORDER BY array_cosine_distance(vector, {vector_str}::FLOAT[{EMBEDDING_DIM}])
+                    LIMIT {limit * 2}
+                )
+                SELECT t.item_id, c.body AS snippet, (1.0 - t.dist) AS sem_score
+                FROM top_embeddings t
+                JOIN content c ON c.id = t.content_id
+                """
+            ).fetchall()
+        else:
+            # Filtered Path: Must join against filtered items first
+            semantic_rows = cursor.execute(
+                f"""
+                WITH filtered_embeddings AS (
+                    SELECT e.item_id, e.content_id, e.vector
+                    FROM embeddings e
+                    JOIN items i ON i.id = e.item_id
+                    WHERE {sql_filter}
+                ),
+                top_embeddings AS (
+                    SELECT item_id, content_id, array_cosine_distance(vector, {vector_str}::FLOAT[{EMBEDDING_DIM}]) AS dist
+                    FROM filtered_embeddings
+                    ORDER BY array_cosine_distance(vector, {vector_str}::FLOAT[{EMBEDDING_DIM}])
+                    LIMIT {limit * 2}
+                )
+                SELECT t.item_id, c.body AS snippet, (1.0 - t.dist) AS sem_score
+                FROM top_embeddings t
+                JOIN content c ON c.id = t.content_id
+                """
+            ).fetchall()
     except Exception as e:
         print(f"⚠️ Semantic search failed with filter '{sql_filter}': {e}. Falling back.")
-        semantic_rows = con.execute(
+        semantic_rows = cursor.execute(
             f"""
-            SELECT e.item_id, c.body AS snippet,
-                   array_cosine_similarity(e.vector, ?::FLOAT[{EMBEDDING_DIM}]) AS sem_score
-            FROM embeddings e
-            JOIN content c ON c.id = e.content_id
-            ORDER BY sem_score DESC
-            LIMIT ?;
-            """,
-            [query_vec, limit * 2],
+            WITH top_embeddings AS (
+                SELECT item_id, content_id, array_cosine_distance(vector, {vector_str}::FLOAT[{EMBEDDING_DIM}]) AS dist
+                FROM embeddings
+                ORDER BY array_cosine_distance(vector, {vector_str}::FLOAT[{EMBEDDING_DIM}])
+                LIMIT {limit * 2}
+            )
+            SELECT t.item_id, c.body AS snippet, (1.0 - t.dist) AS sem_score
+            FROM top_embeddings t
+            JOIN content c ON c.id = t.content_id
+            """
         ).fetchall()
 
     semantic: dict[int, dict] = {}
@@ -105,30 +176,10 @@ def search(query: str, limit: int = 10, use_enrichment: bool = True) -> list[dic
         if item_id not in semantic or score > semantic[item_id]["sem_score"]:
             semantic[item_id] = {"snippet": snippet, "sem_score": score}
 
-    # ── 3. Lexical search (TF-IDF / BM25) ────────────────────────────
     lexical: dict[int, dict] = {}
-    
-    # Use DuckDB FTS extension for true TF-IDF / BM25
-    # Use DuckDB FTS extension for true TF-IDF / BM25
-    try:
-        lex_rows = con.execute(
-            f"""
-            SELECT c.item_id, c.body AS snippet, fts_main_content.match_bm25(c.id, ?) AS lex_score
-            FROM content c
-            JOIN items i ON i.id = c.item_id
-            WHERE fts_main_content.match_bm25(c.id, ?) IS NOT NULL
-              AND {sql_filter}
-            ORDER BY lex_score DESC
-            LIMIT ?;
-            """,
-            [expanded_query, expanded_query, limit * 2],
-        ).fetchall()
-
-        for item_id, snippet, lex_score in lex_rows:
-            if item_id not in lexical or lex_score > lexical[item_id]["lex_score"]:
-                lexical[item_id] = {"snippet": snippet, "lex_score": lex_score}
-    except Exception as e:
-        print(f"FTS Search failed: {e}")
+    for item_id, snippet, lex_score in lex_rows:
+        if item_id not in lexical or lex_score > lexical[item_id]["lex_score"]:
+            lexical[item_id] = {"snippet": snippet, "lex_score": lex_score}
 
     # 3. Merge & Rank
     all_ids = set(semantic.keys()) | set(lexical.keys())
@@ -139,8 +190,6 @@ def search(query: str, limit: int = 10, use_enrichment: bool = True) -> list[dic
     for item_id in all_ids:
         sem = semantic.get(item_id, {}).get("sem_score", 0.0)
         raw_lex = lexical.get(item_id, {}).get("lex_score", 0.0)
-        
-        # Normalize BM25 score to 0..1 scale roughly
         norm_lex = (raw_lex / max_lex) if max_lex > 0 else 0.0
 
         # Weighted combination: 70 % semantic, 30 % lexical
@@ -159,13 +208,17 @@ def search(query: str, limit: int = 10, use_enrichment: bool = True) -> list[dic
 
     results.sort(key=lambda r: r["score"], reverse=True)
     results = results[:limit]
-
-    # 4. Attach Metadata
-    for r in results:
-        item = db.get_item(r["item_id"])
-        if item:
-            r["title"] = item.get("title") or "(Sin título)"
-            r["tags"] = item.get("tags", "")
-            r["summary"] = item.get("summary", "")
+    
+    # 4. Attach Metadata (Batched queries)
+    if results:
+        item_ids = [r["item_id"] for r in results]
+        items_dict = {item["id"]: item for item in db.get_items_by_ids(item_ids)}
+        
+        for r in results:
+            item = items_dict.get(r["item_id"])
+            if item:
+                r["title"] = item.get("title") or "(Sin título)"
+                r["tags"] = item.get("tags", "")
+                r["summary"] = item.get("summary", "")
 
     return results

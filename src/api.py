@@ -1,5 +1,6 @@
 import os
 import shutil
+import mimetypes
 from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -70,7 +71,19 @@ def api_ingest(file: UploadFile = File(...)):
             shutil.copyfileobj(file.file, f)
             
         try:
-            item_id = ingest_file(temp_path)
+            mime, _ = mimetypes.guess_type(temp_path)
+            mime = mime or "application/octet-stream"
+            
+            if mime.startswith("image/"):
+                from backend.ocr import extract_text_from_image
+                parsed_text = extract_text_from_image(temp_path)
+            else:
+                try:
+                    parsed_text = Path(temp_path).read_text(encoding="utf-8")
+                except UnicodeDecodeError:
+                    raise ValueError("File encoding error. Must be UTF-8.")
+                    
+            item_id = ingest_file(temp_path, parsed_text)
             return IngestResponse(
                 success=True,
                 message="Document successfully ingested.",

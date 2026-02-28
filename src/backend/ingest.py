@@ -14,10 +14,8 @@ import logging
 from google import genai
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from backend.config import GEMINI_API_KEY, EMBEDDING_MODEL, CHUNK_SIZE, CHUNK_OVERLAP, TESSERACT_CMD
+from backend.config import GEMINI_API_KEY, EMBEDDING_MODEL, CHUNK_SIZE, CHUNK_OVERLAP
 from backend import db
-from PIL import Image
-import pytesseract
 
 
 
@@ -28,10 +26,6 @@ class DuplicateError(Exception):
         self.existing_id = existing_id
 
 from backend.llm import get_client
-
-if TESSERACT_CMD:
-    pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
-
 
 def get_embedding(text: str) -> list[float]:
     result = get_client().models.embed_content(
@@ -66,7 +60,7 @@ def calculate_md5(path: Path) -> str:
     return hash_md5.hexdigest()
 
 
-def ingest_file(path: str) -> int:
+def ingest_file(path: str, parsed_text: str) -> int:
     start_time = time.time()
     filepath = Path(path).resolve()
     if not filepath.exists():
@@ -91,18 +85,8 @@ def ingest_file(path: str) -> int:
     if not (mime.startswith("text/") or mime.startswith("image/")):
         raise ValueError(f"Unsupported file type: {mime}. Only text/* and image/* supported.")
 
-    # 4. Read
-    try:
-        if mime.startswith("image/"):
-            image = Image.open(filepath)
-            text = pytesseract.image_to_string(image)
-        else:
-            text = filepath.read_text(encoding="utf-8")
-    except UnicodeDecodeError:
-        raise ValueError("File encoding error. Must be UTF-8.")
-    except Exception as e:
-        raise ValueError(f"Error processing file/image: {e}")
-        
+    # 4. Use provided parsed text
+    text = parsed_text
     if not text.strip():
         raise ValueError("File or image is empty/no text could be extracted.")
 

@@ -56,7 +56,9 @@ def test_ocr_pipeline():
     
     print("\n🚀 Testing Ingestion...")
     try:
-        item_id = ingest.ingest_file(img_path)
+        from backend.ocr import extract_text_from_image
+        parsed_text = extract_text_from_image(img_path)
+        item_id = ingest.ingest_file(img_path, parsed_text)
         print(f"✅ Ingested successfully. Item ID: {item_id}")
     except ingest.DuplicateError as e:
         print(f"ℹ️ File already ingested. Item ID: {e.existing_id}")

@@ -262,6 +262,16 @@ def get_item(item_id: int) -> dict | None:
     return _row_to_dict(con, row)
 
 
+def get_items_by_ids(item_ids: list[int]) -> list[dict]:
+    """Fetch multiple items by their ids."""
+    if not item_ids:
+        return []
+    con = get_connection()
+    placeholders = ",".join(["?"] * len(item_ids))
+    rows = con.execute(f"SELECT * FROM items WHERE id IN ({placeholders});", item_ids).fetchall()
+    return _rows_to_dicts(con, rows)
+
+
 def get_all_items() -> list[dict]:
     """List all items."""
     con = get_connection()
