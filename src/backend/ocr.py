@@ -1,13 +1,21 @@
 from pathlib import Path
-from PIL import Image
-import pytesseract
+import easyocr
+import torch
+import warnings
 
-from backend.config import TESSERACT_CMD
+# Intentar usar GPU si está disponible
+use_gpu = torch.cuda.is_available()
 
-if TESSERACT_CMD:
-    pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
+# Si no hay GPU, eliminamos la advertencia del pin_memory que tira PyTorch
+if not use_gpu:
+    warnings.filterwarnings("ignore", category=UserWarning, module="torch.utils.data.dataloader")
+
+# Inicializar EasyOCR a nivel global para que no cargue el modelo en cada llamada
+# verbose=False quita el warning "Using CPU. Note: This module is much faster with a GPU."
+reader = easyocr.Reader(['es', 'en'], gpu=use_gpu, verbose=False)
 
 def extract_text_from_image(filepath: Path | str) -> str:
-    """Extracts text from an image using Tesseract OCR."""
-    image = Image.open(filepath)
-    return pytesseract.image_to_string(image)
+    """Extracts text from an image using EasyOCR."""
+    # detail=0 devuelve solo una lista de strings (el texto detectado)
+    result = reader.readtext(str(filepath), detail=0)
+    return ' '.join(result)
