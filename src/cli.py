@@ -17,6 +17,7 @@ import json
 import csv
 import sys
 import io
+import logging
 from pathlib import Path
 
 import typer
@@ -49,7 +50,9 @@ def ingest(
         raise typer.Exit(code=1)
 
     try:
+        logging.info(f"Ingesting file: {filepath}")
         item_id = ingest_file(str(filepath))
+        logging.info(f"Successfully ingested item #{item_id}")
         console.print(
             Panel(
                 f"[green]Item #{item_id}[/green] stored successfully.\n"
@@ -71,6 +74,7 @@ def search(
     """Search the vault with natural language."""
     from backend.search import search as do_search
 
+    logging.info(f"Searching for query: '{query}' (limit: {limit})")
     results = do_search(query, limit=limit)
 
     if not results:
@@ -101,6 +105,7 @@ def list_items():
     """List all items stored in the vault."""
     from backend.db import get_all_items
 
+    logging.info("Listing all items in the vault")
     items = get_all_items()
     if not items:
         console.print("[yellow]The vault is empty.[/yellow]")
@@ -135,6 +140,7 @@ def show(
     from backend.db import get_item, get_chunks_for_item
     from backend.connections import get_connections
 
+    logging.info(f"Showing details for item #{item_id}")
     item = get_item(item_id)
     if item is None:
         console.print(f"[red]❌ Item #{item_id} not found.[/red]")
@@ -182,6 +188,7 @@ def export(
     """Export all items from the vault."""
     from backend.db import get_all_items, get_chunks_for_item
 
+    logging.info(f"Exporting all items in format: {format}")
     items = get_all_items()
     if not items:
         console.print("[yellow]Nothing to export.[/yellow]")
@@ -222,23 +229,34 @@ def export(
 
 @app.command()
 def logstart():
-    """Start logging."""
-    from backend.log import start_logging
-    start_logging()
-    console.print("[green]Logging started.[/green]")
+    """Start or stop tracking operations to a log file."""
+    from backend.log import toggle_logging
+    
+    enabled = toggle_logging()
+    if enabled:
+        console.print("[green]File logging started. Operations will be tracked.[/green]")
+        logging.info("=== File logging started ===")
+    else:
+        logging.info("=== File logging stopped ===")
+        console.print("[yellow]File logging stopped.[/yellow]")
+
 @app.callback()
 def main(
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging."),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose console logging."),
 ):
-    import logging
     from rich.logging import RichHandler
+    from backend.log import setup_file_logging
 
+    # Base logging setup for console (if verbose) or general info
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(message)s",
         datefmt="[%X]",
         handlers=[RichHandler(rich_tracebacks=True, console=console)],
     )
+    
+    # Attach persistent file handler if logging is enabled
+    setup_file_logging()
 
 
 # ── Entry point ──────────────────────────────────────────────────────
