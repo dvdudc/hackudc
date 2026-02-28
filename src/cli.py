@@ -8,6 +8,7 @@ Usage:
     python cli.py list
     python cli.py show <id>
     python cli.py export [--format json|csv]
+    python cli.py logstart
 """
 
 from __future__ import annotations
@@ -218,6 +219,26 @@ def export(
         raise typer.Exit(code=1)
 
     console.print(f"\n[green]Exported {len(export_data)} item(s).[/green]")
+
+@app.command()
+def logstart():
+    """Start logging."""
+    from backend.log import start_logging
+    start_logging()
+    console.print("[green]Logging started.[/green]")
+@app.callback()
+def main(
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging."),
+):
+    import logging
+    from rich.logging import RichHandler
+
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.INFO,
+        format="%(message)s",
+        datefmt="[%X]",
+        handlers=[RichHandler(rich_tracebacks=True, console=console)],
+    )
 
 
 # ── Entry point ──────────────────────────────────────────────────────
