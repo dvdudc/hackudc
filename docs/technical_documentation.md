@@ -6,12 +6,12 @@ Black Vault is designed as a local-first, intelligence-augmented file storage sy
 
 Black Vault uses a strictly decoupled **Two-Layer Architecture**:
 
-### Interface Layer ([cli.py](file:///home/hulio/HackUDC26/hackudc/src/cli.py))
+### Interface Layer ([src/cli.py](file:///home/hulio/HackUDC26/hackudc/src/cli.py))
 - **Responsibility**: User interaction, command parsing, and result formatting.
 - **Tech**: Built with `typer` (CLI structure) and [rich](file:///home/hulio/HackUDC26/hackudc/src/backend/enrich.py#25-79) (UI formatting/tables).
 - **Decoupling**: It never connects to DuckDB directly. It interacts purely with the `backend` package. This allows future ports to Tauri (GUI) or a FastAPI wrapper without changing the core processor.
 
-### Processor Layer (`backend/`)
+### Processor Layer (`src/backend/`)
 - **Responsibility**: The "brain" of the application. Handles ingestion, vectorization, enrichment, and searching.
 - **Components**:
   - [ingest.py](file:///home/hulio/HackUDC26/hackudc/src/backend/ingest.py): Manages the data pipeline.
@@ -20,6 +20,11 @@ Black Vault uses a strictly decoupled **Two-Layer Architecture**:
   - [enrich.py](file:///home/hulio/HackUDC26/hackudc/src/backend/enrich.py): Local semantic augmentation (Ollama).
   - [connections.py](file:///home/hulio/HackUDC26/hackudc/src/backend/connections.py): Relationship discovery engine.
   - [log.py](file:///home/hulio/HackUDC26/hackudc/src/backend/log.py): Persistent logging toggle logic.
+
+### Testing Layer (`tests/`)
+- **Responsibility**: Validation and benchmarking.
+- **Components**:
+  - [test_enriched_search.py](file:///home/hulio/HackUDC26/hackudc/tests/test_enriched_search.py): Comparative benchmark for LLM-enriched queries.
 
 ---
 
@@ -89,8 +94,8 @@ Uses the **DuckDB-VSS** extension to perform an HNSW (Hierarchical Navigable Sma
 - **Precision**: Handles conceptual matches (e.g., search "programación" finds files about "Python").
 
 ### Lexical Ranking (30% weight)
-Uses standard SQL `ILIKE` operators to find exact keyword matches across text chunks.
-- **Precision**: Handles specific terms, names, or IDs that embeddings might overlook.
+Uses the **DuckDB-FTS** extension to perform BM25 (Best Matching 25) ranking across text chunks.
+- **Precision**: Handles specific terms, names, or IDs that embeddings might overlook using probabilistic relevance.
 
 ### Fusion
 Results are combined and deduplicated at the `item_id` level. A final weighted score is computed, and the system returns the top-ranked unique items.

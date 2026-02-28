@@ -130,26 +130,22 @@ Archivo .txt/.md
 La búsqueda combina dos estrategias:
 
 1. **Semántica (70%)** — Embebe la query, busca vecinos más cercanos via HNSW index (coseno)
-2. **Léxica (30%)** — ILIKE sobre el texto de los chunks
+2. **Léxica (30%)** — Búsqueda por palabras clave indexadas (BM25)
 
 Los resultados se fusionan y ordenan por score combinado.
 
 ## Estructura del proyecto
 
 ```
-src/
-├── backend/
-│   ├── __init__.py       # Package init
-│   ├── config.py         # Settings & env vars
-│   ├── db.py             # DuckDB schema, VSS, CRUD
-│   ├── ingest.py         # Pipeline: read → chunk → embed → store
-│   ├── enrich.py         # Ollama enrichment/metadata extraction
-│   ├── search.py         # Hybrid semantic + lexical search
-│   ├── connections.py    # Inter-item similarity
-│   └── log.py            # Persistent logging configuration
-├── cli.py                # Typer CLI entry point
-├── requirements.txt
-└── .env.example
+.
+├── docs/                 # Documentación técnica
+├── src/                  # Código fuente
+│   ├── backend/          # Lógica del procesador y base de datos
+│   ├── cli.py            # Entry point de la aplicación (Typer)
+│   ├── .env.example      # Plantilla de variables de entorno
+│   └── requirements.txt  # Dependencias de Python
+├── tests/                # Pruebas y benchmarks de búsqueda
+└── README.md             # Esta guía
 ```
 
 ## MVP — Limitaciones actuales
