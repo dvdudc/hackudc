@@ -9,3 +9,5 @@ pytest
 fastapi
 uvicorn
 python-multipart
+Pillow
+pytesseract

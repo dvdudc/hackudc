@@ -29,3 +29,10 @@ CHUNK_OVERLAP: int = 100
 
 # ── Connections ──────────────────────────────────────────────────────
 CONNECTION_THRESHOLD: float = 0.75
+
+# ── Tesseract OCR ────────────────────────────────────────────────────
+# Ruta al ejecutable de Tesseract (necesario en Windows si no está en el PATH)
+# Ejemplo: r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+TESSERACT_CMD: str = os.getenv("TESSERACT_CMD", "")
+if not TESSERACT_CMD and os.path.exists(r"C:\Program Files\Tesseract-OCR\tesseract.exe"):
+    TESSERACT_CMD = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
