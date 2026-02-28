@@ -14,10 +14,9 @@ import logging
 from google import genai
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from backend.config import GEMINI_API_KEY, EMBEDDING_MODEL, CHUNK_SIZE, CHUNK_OVERLAP, TESSERACT_CMD
+from backend.config import GEMINI_API_KEY, EMBEDDING_MODEL, CHUNK_SIZE, CHUNK_OVERLAP
 from backend import db
-from PIL import Image
-import pytesseract
+from backend.ocr import extract_text_from_image
 
 
 
@@ -28,10 +27,6 @@ class DuplicateError(Exception):
         self.existing_id = existing_id
 
 from backend.llm import get_client
-
-if TESSERACT_CMD:
-    pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
-
 
 def get_embedding(text: str) -> list[float]:
     result = get_client().models.embed_content(
@@ -94,8 +89,7 @@ def ingest_file(path: str) -> int:
     # 4. Read
     try:
         if mime.startswith("image/"):
-            image = Image.open(filepath)
-            text = pytesseract.image_to_string(image)
+            text = extract_text_from_image(filepath)
         else:
             text = filepath.read_text(encoding="utf-8")
     except UnicodeDecodeError:
