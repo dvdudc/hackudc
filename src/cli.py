@@ -8,7 +8,7 @@ Usage:
     python cli.py list
     python cli.py show <id>
     python cli.py export [--format json|csv]
-    python cli.py logstart
+    python cli.py logtoggle
 """
 
 from __future__ import annotations
@@ -228,7 +228,7 @@ def export(
     console.print(f"\n[green]Exported {len(export_data)} item(s).[/green]")
 
 @app.command()
-def logstart():
+def logtoggle():
     """Start or stop tracking operations to a log file."""
     from backend.log import toggle_logging
     
