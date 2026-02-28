@@ -58,9 +58,17 @@ def ingest(
         mime, _ = mimetypes.guess_type(str(filepath))
         mime = mime or "application/octet-stream"
         
+        # OGG files are sometimes detected as video/ogg or application/ogg 
+        # but they are just audio for us.
+        if filepath.suffix.lower() == ".ogg":
+            mime = "audio/ogg"
+        
         if mime.startswith("image/"):
             from backend.ocr import extract_text_from_image
             parsed_text = extract_text_from_image(str(filepath))
+        elif mime.startswith("audio/"):
+            from backend.stt import extract_text_from_audio
+            parsed_text = extract_text_from_audio(str(filepath))
         else:
             try:
                 parsed_text = filepath.read_text(encoding="utf-8")

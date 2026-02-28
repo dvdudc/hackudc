@@ -82,8 +82,11 @@ def ingest_file(path: str, parsed_text: str) -> int:
 
     # 3. MIME Check
     mime = detect_mime(str(filepath))
-    if not (mime.startswith("text/") or mime.startswith("image/")):
-        raise ValueError(f"Unsupported file type: {mime}. Only text/* and image/* supported.")
+    if filepath.suffix.lower() == ".ogg":
+        mime = "audio/ogg"
+        
+    if not (mime.startswith("text/") or mime.startswith("image/") or mime.startswith("audio/")):
+        raise ValueError(f"Unsupported file type: {mime}. Only text/*, image/* and audio/* supported.")
 
     # 4. Use provided parsed text
     text = parsed_text
@@ -106,7 +109,7 @@ def ingest_file(path: str, parsed_text: str) -> int:
 
     # ── 5. Store ─────────────────────────────────────────────────────
     mtime = os.path.getmtime(str(filepath))
-    source_type = "image" if mime.startswith("image/") else "text"
+    source_type = "image" if mime.startswith("image/") else "audio" if mime.startswith("audio/") else "text"
     item_id = db.insert_item(source_path=str(filepath), source_type=source_type, file_hash=file_hash, file_mtime=mtime)
 
     for i, (chunk, vec) in enumerate(zip(chunks, vectors)):

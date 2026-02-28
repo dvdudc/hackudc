@@ -11,3 +11,5 @@ uvicorn
 python-multipart
 Pillow
 easyocr
+vosk
+imageio-ffmpeg
