@@ -5,7 +5,7 @@ Read text file → verify MIME → chunk → embed → store.
 
 from __future__ import annotations
 
-import magic
+import mimetypes
 from pathlib import Path
 from google import genai
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -45,8 +45,9 @@ def get_embeddings_batch(texts: list[str]) -> list[list[float]]:
 
 
 def detect_mime(path: str) -> str:
-    """Detect real MIME type using libmagic."""
-    return magic.from_file(path, mime=True)
+    """Detect MIME type using built-in mimetypes."""
+    mime_type, _ = mimetypes.guess_type(path)
+    return mime_type or "application/octet-stream"
 
 
 def ingest_file(path: str) -> int:
