@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import mimetypes
+import os
 from pathlib import Path
 from google import genai
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -112,19 +113,17 @@ def ingest_file(path: str) -> int:
     print("🧠 Generating embeddings...")
     vectors = get_embeddings_batch(chunks)
 
-    # 7. Store
-    item_id = db.insert_item(
-        source_path=str(filepath), 
-        source_type="text",
-        file_hash=file_hash
-    )
+    # ── 5. Store ─────────────────────────────────────────────────────
+    mtime = os.path.getmtime(str(filepath))
+    item_id = db.insert_item(source_path=str(filepath), source_type="text", file_mtime=mtime)
 
     for i, (chunk, vec) in enumerate(zip(chunks, vectors)):
         content_id = db.insert_content(item_id=item_id, chunk_index=i, body=chunk)
         db.insert_embedding(content_id=content_id, item_id=item_id, vector=vec)
 
+    # Rebuild indexes after inserting new data
     db.create_hnsw_index()
-    print(f"✅ Stored as Item #{item_id}")
+    db.create_fts_index()
 
     # 8. Enrichment & Connections
     from backend.enrich import enrich_item

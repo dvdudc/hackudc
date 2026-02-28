@@ -15,18 +15,14 @@ _con: duckdb.DuckDBPyConnection | None = None
 
 
 def get_connection() -> duckdb.DuckDBPyConnection:
-    """Return (or create) the DuckDB connection and ensure VSS is loaded."""
+    """Return (or create) the DuckDB connection and ensure VSS and FTS are loaded."""
     global _con
     if _con is None:
         Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
         
         _con = duckdb.connect(DB_PATH)
-        try:
-            _con.execute("INSTALL vss;")
-            _con.execute("LOAD vss;")
-        except Exception:
-            pass
-        
+        _con.execute("INSTALL vss; LOAD vss;")
+        _con.execute("INSTALL fts; LOAD fts;")
         _con.execute("SET hnsw_enable_experimental_persistence = true;")
         init_schema(_con)
     return _con
@@ -59,6 +55,7 @@ def init_schema(con: duckdb.DuckDBPyConnection) -> None:
             title       TEXT,
             tags        TEXT,
             summary     TEXT,
+            file_mtime  TIMESTAMP,
             created_at  TIMESTAMP DEFAULT now(),
             enriched    BOOLEAN DEFAULT FALSE
         );
@@ -82,6 +79,26 @@ def init_schema(con: duckdb.DuckDBPyConnection) -> None:
         );
     """)
 
+    con.execute("CREATE SEQUENCE IF NOT EXISTS meta_seq START 1;")
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS chunk_metadata (
+            id               INTEGER PRIMARY KEY DEFAULT nextval('meta_seq'),
+            content_id       INTEGER REFERENCES content(id),
+            titulo           TEXT,
+            resumen          TEXT,
+            tipo_contenido   TEXT,
+            idioma           TEXT,
+            tags             JSON,
+            terminos_clave   JSON,
+            densidad         FLOAT,
+            score_relevancia FLOAT,
+            entidades        JSON,
+            preguntas        JSON,
+            contexto         TEXT,
+            posicion         TEXT
+        );
+    """)
+
     con.execute("""
         CREATE TABLE IF NOT EXISTS connections (
             item_a INTEGER REFERENCES items(id),
@@ -102,33 +119,35 @@ def create_hnsw_index(con: duckdb.DuckDBPyConnection | None = None) -> None:
             "ON embeddings USING HNSW(vector) WITH (metric = 'cosine');"
         )
     except duckdb.CatalogException:
+        pass  # index already exists
+
+
+def create_fts_index(con: duckdb.DuckDBPyConnection | None = None) -> None:
+    """Create or recreate the FTS index on content."""
+    if con is None:
+        con = get_connection()
+    try:
+        con.execute("PRAGMA drop_fts_index('content');")
+    except Exception:
         pass
+    con.execute("PRAGMA create_fts_index('content', 'id', 'body');")
 
 
 # ── CRUD helpers ─────────────────────────────────────────────────────
 
-def get_item_by_hash(file_hash: str) -> dict | None:
-    """Check if an item with this MD5 hash already exists."""
-    con = get_connection()
-    row = con.execute(
-        "SELECT id, source_path FROM items WHERE file_hash = ?;", 
-        [file_hash]
-    ).fetchone()
-    
-    if row is None:
-        return None
-    
-    cols = [d[0] for d in con.description]
-    return dict(zip(cols, row))
-
-
-def insert_item(source_path: str, source_type: str = "text", file_hash: str = None) -> int:
+def insert_item(source_path: str, source_type: str = "text", file_mtime: float = None) -> int:
     """Insert a new item and return its id."""
     con = get_connection()
-    result = con.execute(
-        "INSERT INTO items (source_path, source_type, file_hash) VALUES (?, ?, ?) RETURNING id;",
-        [source_path, source_type, file_hash],
-    ).fetchone()
+    if file_mtime is not None:
+        result = con.execute(
+            "INSERT INTO items (source_path, source_type, file_mtime) VALUES (?, ?, to_timestamp(?)) RETURNING id;",
+            [source_path, source_type, file_mtime],
+        ).fetchone()
+    else:
+        result = con.execute(
+            "INSERT INTO items (source_path, source_type) VALUES (?, ?) RETURNING id;",
+            [source_path, source_type],
+        ).fetchone()
     return result[0]
 
 
@@ -150,6 +169,35 @@ def insert_embedding(content_id: int, item_id: int, vector: list[float]) -> int:
         [content_id, item_id, vector],
     ).fetchone()
     return result[0]
+
+def insert_chunk_metadata(content_id: int, meta: dict) -> None:
+    """Insert JSON metadata parsed from LLM for a specific chunk."""
+    con = get_connection()
+    import json
+    con.execute(
+        """
+        INSERT INTO chunk_metadata (
+            content_id, titulo, resumen, tipo_contenido, idioma,
+            tags, terminos_clave, densidad, score_relevancia,
+            entidades, preguntas, contexto, posicion
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            content_id,
+            meta.get("titulo"),
+            meta.get("resumen"),
+            meta.get("tipo_contenido"),
+            meta.get("idioma"),
+            json.dumps(meta.get("tags", [])),
+            json.dumps(meta.get("terminos_clave_ponderados", {})),
+            meta.get("densidad_tematica"),
+            meta.get("score_relevancia_chunk"),
+            json.dumps(meta.get("entidades", {})),
+            json.dumps(meta.get("preguntas_que_responde", [])),
+            meta.get("contexto_necesario"),
+            meta.get("chunk_posicion")
+        ]
+    )
 
 
 def insert_connection(item_a: int, item_b: int, score: float) -> None:
@@ -193,10 +241,16 @@ def get_all_items() -> list[dict]:
 
 
 def get_chunks_for_item(item_id: int) -> list[dict]:
-    """Return all text chunks for an item."""
+    """Return all text chunks for an item, ordered by chunk_index, including metadata if any."""
     con = get_connection()
     rows = con.execute(
-        "SELECT * FROM content WHERE item_id = ? ORDER BY chunk_index;",
+        """
+        SELECT c.*, m.titulo, m.resumen, m.score_relevancia
+        FROM content c
+        LEFT JOIN chunk_metadata m ON m.content_id = c.id
+        WHERE c.item_id = ?
+        ORDER BY c.chunk_index;
+        """,
         [item_id],
     ).fetchall()
     cols = [d[0] for d in con.description]
