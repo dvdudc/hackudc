@@ -39,12 +39,13 @@ Black Vault es una aplicación local donde puedes soltar cualquier archivo de te
 | Componente | Tecnología |
 |------------|------------|
 | Base de datos | DuckDB + extensión VSS (HNSW) |
-| Embeddings | Google `gemini-embedding-001` (768 dim) |
-| Enriquecimiento | Google `gemini-2.0-flash` (título, tags, resumen) |
+| Embeddings | Google `gemini-embedding-001` (3072 dim) |
+| Enriquecimiento | Ollama `llama3.2` (título, tags, resumen) |
 | Chunking | `langchain-text-splitters` (RecursiveCharacterTextSplitter) |
 | Detección de tipo | `python-magic` (libmagic) |
 | CLI | `typer` + `rich` |
 | Búsqueda | Híbrida: semántica (coseno HNSW) + léxica (ILIKE), peso 70/30 |
+| Logging | RichHandler + File Logging (toggled via CLI) |
 
 ## Quick Start
 
@@ -70,7 +71,7 @@ pip install -r requirements.txt
 
 ```bash
 cp .env.example .env
-# Edita .env y añade tu GEMINI_API_KEY
+# Edita .env y añade tu GEMINI_API_KEY y OLLAMA_HOST
 ```
 
 ### 4. Uso
@@ -79,8 +80,12 @@ cp .env.example .env
 # Ingestar un fichero de texto
 python cli.py ingest documento.txt
 
-# Buscar con lenguaje natural
+# Activar/Desactivar el logging de archivos persistente
+python cli.py logstart
+
+# Buscar con lenguaje natural (puedes usar -v para modo verbose)
 python cli.py search "ideas sobre productividad"
+python cli.py -v list
 
 # Listar todos los items
 python cli.py list
@@ -114,7 +119,7 @@ Archivo .txt/.md
   DuckDB Store        ← items + content + embeddings
        │
        ▼
-  Enriquecimiento     ← Gemini Flash → {título, tags[], resumen}
+  Enriquecimiento     ← Ollama (llama3.2) via HTTP → {título, tags[], resumen}
        │
        ▼
   Conexiones          ← Cosine similarity entre mean embeddings (threshold 0.75)
@@ -138,13 +143,13 @@ src/
 │   ├── config.py         # Settings & env vars
 │   ├── db.py             # DuckDB schema, VSS, CRUD
 │   ├── ingest.py         # Pipeline: read → chunk → embed → store
-│   ├── enrich.py         # GPT-4o mini enrichment
+│   ├── enrich.py         # Ollama enrichment/metadata extraction
 │   ├── search.py         # Hybrid semantic + lexical search
-│   └── connections.py    # Inter-item similarity
+│   ├── connections.py    # Inter-item similarity
+│   └── log.py            # Persistent logging configuration
 ├── cli.py                # Typer CLI entry point
 ├── requirements.txt
-├── .env.example
-└── chunker.py            # (legacy prototype)
+└── .env.example
 ```
 
 ## MVP — Limitaciones actuales

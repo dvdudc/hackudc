@@ -35,6 +35,10 @@ src/ejemplo.txt
 src/ejemplo_palabra.txt
 
 # Variables de entorno
+# Variables de entorno
 .env
-.env.*
+.env.[!example]*
+/src/.env
+/src/.env.*
+!/src/.env.example
 

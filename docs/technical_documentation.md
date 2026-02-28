@@ -17,8 +17,9 @@ Black Vault uses a strictly decoupled **Two-Layer Architecture**:
   - [ingest.py](file:///home/hulio/HackUDC26/hackudc/src/backend/ingest.py): Manages the data pipeline.
   - [db.py](file:///home/hulio/HackUDC26/hackudc/src/backend/db.py): Abstracted data access layer.
   - [search.py](file:///home/hulio/HackUDC26/hackudc/src/backend/search.py): Hybrid ranking engine.
-  - [enrich.py](file:///home/hulio/HackUDC26/hackudc/src/backend/enrich.py): High-level semantic augmentation (Gemini).
+  - [enrich.py](file:///home/hulio/HackUDC26/hackudc/src/backend/enrich.py): Local semantic augmentation (Ollama).
   - [connections.py](file:///home/hulio/HackUDC26/hackudc/src/backend/connections.py): Relationship discovery engine.
+  - [log.py](file:///home/hulio/HackUDC26/hackudc/src/backend/log.py): Persistent logging toggle logic.
 
 ---
 
@@ -101,10 +102,14 @@ Results are combined and deduplicated at the `item_id` level. A final weighted s
 After ingestion, the system triggers two "background" (inline for MVP) processes:
 
 ### Enrichment ([enrich.py](file:///home/hulio/HackUDC26/hackudc/src/backend/enrich.py))
-Calls `gemini-2.5-flash` with a tailored prompt. The model processes all chunks and returns a JSON schema containing:
+Calls a local Ollama instance running `llama3.2` via HTTP. The model processes each chunk and returns a structured JSON metadata block for each. Finally, the system aggregates these to establish:
 - A human-readable **Title**.
 - Relevant **Tags** for filtering.
 - A concise **Summary**.
+
+### Operations Tracking ([log.py](file:///home/hulio/HackUDC26/hackudc/src/backend/log.py))
+- Provides a persistent file logging mechanism. 
+- When enabled via `logstart` command, all CLI activities are timestamped and recorded in `blackvault.log`.
 
 ### Relationship Discovery ([connections.py](file:///home/hulio/HackUDC26/hackudc/src/backend/connections.py))
 - Computes a **Mean Embedding** for the entire document (averaging its chunks).
