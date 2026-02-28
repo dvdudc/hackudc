@@ -14,8 +14,10 @@ import logging
 from google import genai
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from backend.config import GEMINI_API_KEY, EMBEDDING_MODEL, CHUNK_SIZE, CHUNK_OVERLAP
+from backend.config import GEMINI_API_KEY, EMBEDDING_MODEL, CHUNK_SIZE, CHUNK_OVERLAP, TESSERACT_CMD
 from backend import db
+from PIL import Image
+import pytesseract
 
 
 
@@ -26,6 +28,9 @@ class DuplicateError(Exception):
         self.existing_id = existing_id
 
 from backend.llm import get_client
+
+if TESSERACT_CMD:
+    pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
 
 
 def get_embedding(text: str) -> list[float]:
@@ -83,17 +88,23 @@ def ingest_file(path: str) -> int:
 
     # 3. MIME Check
     mime = detect_mime(str(filepath))
-    if not mime.startswith("text/"):
-        raise ValueError(f"Unsupported file type: {mime}. Only text/* supported.")
+    if not (mime.startswith("text/") or mime.startswith("image/")):
+        raise ValueError(f"Unsupported file type: {mime}. Only text/* and image/* supported.")
 
     # 4. Read
     try:
-        text = filepath.read_text(encoding="utf-8")
+        if mime.startswith("image/"):
+            image = Image.open(filepath)
+            text = pytesseract.image_to_string(image)
+        else:
+            text = filepath.read_text(encoding="utf-8")
     except UnicodeDecodeError:
         raise ValueError("File encoding error. Must be UTF-8.")
+    except Exception as e:
+        raise ValueError(f"Error processing file/image: {e}")
         
     if not text.strip():
-        raise ValueError("File is empty.")
+        raise ValueError("File or image is empty/no text could be extracted.")
 
     # 5. Chunk
     splitter = RecursiveCharacterTextSplitter(
@@ -111,7 +122,8 @@ def ingest_file(path: str) -> int:
 
     # ── 5. Store ─────────────────────────────────────────────────────
     mtime = os.path.getmtime(str(filepath))
-    item_id = db.insert_item(source_path=str(filepath), source_type="text", file_hash=file_hash, file_mtime=mtime)
+    source_type = "image" if mime.startswith("image/") else "text"
+    item_id = db.insert_item(source_path=str(filepath), source_type=source_type, file_hash=file_hash, file_mtime=mtime)
 
     for i, (chunk, vec) in enumerate(zip(chunks, vectors)):
         content_id = db.insert_content(item_id=item_id, chunk_index=i, body=chunk)
