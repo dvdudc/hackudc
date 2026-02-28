@@ -61,11 +61,17 @@ def init_schema(con: duckdb.DuckDBPyConnection) -> None:
         );
     """)
 
-    # Migración: Si la tabla ya existía sin file_hash, la añadimos.
-    try:
-        con.execute("ALTER TABLE items ADD COLUMN file_hash TEXT;")
-    except Exception:
-        pass
+    # Migración: Si la tabla ya existía, intentamos añadir las columnas nuevas.
+    for col_def in [
+        "ADD COLUMN file_hash TEXT",
+        "ADD COLUMN file_mtime TIMESTAMP",
+        "ADD COLUMN created_at TIMESTAMP DEFAULT now()",
+        "ADD COLUMN enriched BOOLEAN DEFAULT FALSE",
+    ]:
+        try:
+            con.execute(f"ALTER TABLE items {col_def};")
+        except Exception:
+            pass
 
     con.execute(f"""
         CREATE TABLE IF NOT EXISTS content (
