@@ -33,3 +33,7 @@ ENV/
 # Project specific
 src/ejemplo.txt
 src/ejemplo_palabra.txt
+
+# Variables de entorno
+.env
+.env.*
