@@ -1,0 +1,81 @@
+import { useState, useCallback } from 'react';
+import { vaultApi } from '@/services/api';
+import type { DocumentResult, DocumentDetail } from '@/services/api';
+
+type RequestState = 'idle' | 'processing' | 'success' | 'error';
+
+export function useVaultApi() {
+    const [searchState, setSearchState] = useState<RequestState>('idle');
+    const [ingestState, setIngestState] = useState<RequestState>('idle');
+    const [detailState, setDetailState] = useState<RequestState>('idle');
+
+    const [searchResults, setSearchResults] = useState<DocumentResult[]>([]);
+    const [currentDetail, setCurrentDetail] = useState<DocumentDetail | null>(null);
+    const [error, setError] = useState<string | null>(null);
+
+    const search = useCallback(async (query: string) => {
+        if (!query.trim()) {
+            setSearchResults([]);
+            setSearchState('idle');
+            return;
+        }
+
+        try {
+            setSearchState('processing');
+            setError(null);
+            const results = await vaultApi.search(query);
+            setSearchResults(results);
+            setSearchState('success');
+        } catch (err) {
+            setError('Failed to search documents.');
+            setSearchState('error');
+        }
+    }, []);
+
+    const ingest = useCallback(async (file: File) => {
+        try {
+            setIngestState('processing');
+            setError(null);
+            const response = await vaultApi.ingest(file);
+            setIngestState('success');
+            return response;
+        } catch (err) {
+            setError('Failed to ingest document.');
+            setIngestState('error');
+            throw err;
+        }
+    }, []);
+
+    const getDetail = useCallback(async (id: string) => {
+        try {
+            setDetailState('processing');
+            setError(null);
+            const detail = await vaultApi.getDetail(id);
+            setCurrentDetail(detail);
+            setDetailState('success');
+        } catch (err) {
+            setError('Failed to fetch document details.');
+            setDetailState('error');
+        }
+    }, []);
+
+    const resetStates = useCallback(() => {
+        setSearchState('idle');
+        setIngestState('idle');
+        setDetailState('idle');
+        setError(null);
+    }, []);
+
+    return {
+        searchState,
+        ingestState,
+        detailState,
+        searchResults,
+        currentDetail,
+        error,
+        search,
+        ingest,
+        getDetail,
+        resetStates
+    };
+}
