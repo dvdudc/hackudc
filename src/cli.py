@@ -205,7 +205,7 @@ def export(
 
     if format.lower() == "json":
         output = json.dumps(export_data, indent=2, ensure_ascii=False)
-        console.print(output)
+        print(output)
     elif format.lower() == "csv":
         if export_data:
             buf = io.StringIO()
