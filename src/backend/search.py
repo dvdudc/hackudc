@@ -79,7 +79,7 @@ def search(query: str, limit: int = 10, use_enrichment: bool = True) -> list[dic
                 rows = con.execute(
                     f"""
                     SELECT i.id AS item_id, i.title, i.tags, i.summary,
-                           i.source_type, i.created_at
+                           i.source_type, i.created_at, i.source_path
                     FROM items i
                     WHERE {sql_filter}
                     ORDER BY i.created_at DESC
@@ -103,6 +103,7 @@ def search(query: str, limit: int = 10, use_enrichment: bool = True) -> list[dic
                         "title": row[1] or "(sin título)",
                         "score": round(recency, 3),
                         "snippet": f"📁 {row[4]} | 🏷️ {row[2] or '—'} | 📝 {row[3] or '—'}",
+                        "source_path": row[6]
                     })
                 results.sort(key=lambda x: x["score"], reverse=True)
                 return results
@@ -299,13 +300,19 @@ def search(query: str, limit: int = 10, use_enrichment: bool = True) -> list[dic
     results = [r for r in results if r["score"] >= 0.1]
     top_results = results[:limit]
 
-    # Fetch titles
+    # Fetch titles and paths
     if top_results:
         placeholders = ",".join("?" for _ in top_results)
         ids = [r["item_id"] for r in top_results]
-        titles = con.execute(f"SELECT id, title FROM items WHERE id IN ({placeholders})", ids).fetchall()
-        title_map = {row[0]: row[1] for row in titles}
+        db_data = con.execute(f"SELECT id, title, source_path FROM items WHERE id IN ({placeholders})", ids).fetchall()
+        
+        data_map = {}
+        for row in db_data:
+            data_map[row[0]] = {"title": row[1] or "(No title)", "source_path": row[2]}
+            
         for r in top_results:
-            r["title"] = title_map.get(r["item_id"], "(No title)")
+            details = data_map.get(r["item_id"], {"title": "(No title)", "source_path": ""})
+            r["title"] = details["title"]
+            r["source_path"] = details["source_path"]
 
     return top_results

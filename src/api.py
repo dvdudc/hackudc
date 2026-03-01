@@ -11,7 +11,7 @@ import uuid
 
 from backend.ingest import ingest_file, DuplicateError, get_ingest_queue, IngestResult, detect_mime
 from backend.search import search as search_docs
-from backend.db import get_item, get_chunks_for_item
+from backend.db import get_item, get_chunks_for_item, delete_item
 from backend.connections import get_connections
 
 VAULT_DIR = Path("blackvault_data/files").resolve()
@@ -86,7 +86,9 @@ def api_search(q: str):
 @app.post("/ingest", response_model=IngestResponse)
 def api_ingest(file: UploadFile = File(...)):
     # Save to a permanent vault directory for ingestion
-    safe_filename = file.filename.replace(" ", "_").replace("/", "_").replace("\\", "_")
+    import time
+    raw_name = file.filename if file.filename else f"document_{int(time.time()*1000)}.txt"
+    safe_filename = raw_name.replace(" ", "_").replace("/", "_").replace("\\", "_")
     unique_filename = f"{uuid.uuid4().hex}_{safe_filename}"
     vault_path = VAULT_DIR / unique_filename
     
@@ -239,6 +241,37 @@ def api_get_document(doc_id: str):
         fullText=full_text,
         connections=connection_results
     )
+
+class DeleteResponse(BaseModel):
+    success: bool
+    message: str
+
+@app.delete("/document/{doc_id}", response_model=DeleteResponse)
+def api_delete_document(doc_id: str):
+    try:
+        item_id = int(doc_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid Document ID")
+        
+    item = get_item(item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    source_path = item.get("source_path")
+    success = delete_item(item_id)
+    
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to delete document from database")
+        
+    # Also delete the physical Vault file if it exists
+    if source_path and os.path.exists(source_path):
+        try:
+            os.remove(source_path)
+            print(f"Removed vault file: {source_path}")
+        except Exception as e:
+            print(f"Warning: Could not remove file {source_path}: {e}")
+            
+    return DeleteResponse(success=True, message=f"Document {item_id} deleted successfully.")
 
 if __name__ == "__main__":
     import uvicorn

@@ -17,6 +17,7 @@ function App() {
     ingestState,
     currentDetail,
     detailState,
+    removeDocument,
     resetStates
   } = useVaultApi();
 
@@ -184,6 +185,7 @@ function App() {
                   <SearchResults
                     results={searchResults}
                     onSelect={handleSelectDocument}
+                    onDelete={removeDocument}
                   />
                 </div>
               </div>
