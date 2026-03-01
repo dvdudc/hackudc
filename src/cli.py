@@ -26,6 +26,7 @@ if sys.stdout.encoding.lower() != 'utf-8':
     sys.stdout.reconfigure(encoding='utf-8')
 
 from pathlib import Path
+#import pytube
 
 import typer
 from rich.console import Console
@@ -46,49 +47,76 @@ console = Console()
 
 @app.command()
 def ingest(
-    files: list[str] = typer.Argument(..., help="Path(s) to text file(s) to ingest."),
+    source: str = typer.Argument(..., help="Path to a text file OR a YouTube URL."),
 ):
-    """Ingest one or more text files into the vault."""
-    from backend.ingest import ingest_file, DuplicateError, get_ingest_queue
+    """Ingest a text file or YouTube video into the vault."""
+    from backend.ingest import ingest_file, DuplicateError
+    import re
+    
+    # ── Detectar si es URL de YouTube ───────────────────────────────
+    def is_youtube_url(text: str) -> bool:
+        pattern = r'(https?://)?(www\.)?(youtube\.com|youtu\.be)/.+'
+        return bool(re.match(pattern, text, re.IGNORECASE))
 
-    # Resolve and validate all paths first
-    resolved: list[Path] = []
-    for f in files:
-        fp = Path(f).resolve()
-        if not fp.exists():
-            console.print(f"[red]❌ File not found:[/red] {fp}")
-            continue
-        resolved.append(fp)
+    # ── Lógica principal ───────────────────────────────────────────
+    if is_youtube_url(source):
+        from backend.youtube import get_video_info
+        import re
 
-    if not resolved:
-        console.print("[red]❌ No valid files to ingest.[/red]")
-        raise typer.Exit(code=1)
+        parsed_text = get_video_info(source)
 
-    # Single file — direct (backward-compatible behaviour)
-    if len(resolved) == 1:
-        filepath = resolved[0]
+        match = re.search(r"ID\s+:\s+(\S+)", parsed_text)
+        video_id = match.group(1) if match else "unknown"
+        
+        youtube_dir = Path("youtube_videos")
+        youtube_dir.mkdir(exist_ok=True)
+        file_path = youtube_dir / f"yt_{video_id}.txt"
+
+        try:
+            file_path.write_text(parsed_text, encoding="utf-8")
+            item_id = ingest_file(str(file_path), parsed_text)
+            console.print(
+                Panel(
+                    f"[green]Item #{item_id}[/green] stored successfully.\n"
+                    f"Source: {source}",
+                    title="✅ YouTube Ingested",
+                    border_style="green",
+                )
+            )
+        except DuplicateError as e:
+            console.print(
+                Panel(
+                    f"[yellow]Item #{e.existing_id}[/yellow] already exists.\n"
+                    f"Skipping ingestion.\nSource: {source}",
+                    title="⚠️  Duplicate Detected",
+                    border_style="yellow",
+                )
+            )
+            
+    else:
+        # 📁 Es archivo local
+        filepath = Path(source).resolve()
+        if not filepath.exists():
+            console.print(f"[red]❌ File not found:[/red] {filepath}")
+            raise typer.Exit(code=1)
+
         try:
             logging.info(f"Ingesting file: {filepath}")
             
-            from backend.ingest import detect_mime
-            mime = detect_mime(str(filepath))
+            import mimetypes
+            mime, _ = mimetypes.guess_type(str(filepath))
+            mime = mime or "application/octet-stream"
             
             if mime.startswith("image/"):
                 from backend.ocr import extract_text_from_image
                 parsed_text = extract_text_from_image(str(filepath))
-            elif mime == "application/pdf":
-                from backend.pdf import extract_text_from_pdf
-                parsed_text = extract_text_from_pdf(str(filepath))
-            elif mime.startswith("audio/"):
-                from backend.stt import extract_text_from_audio
-                parsed_text = extract_text_from_audio(str(filepath))
             else:
                 try:
                     parsed_text = filepath.read_text(encoding="utf-8")
                 except UnicodeDecodeError:
                     raise ValueError("File encoding error. Must be UTF-8.")
                     
-            item_id = ingest_file(str(filepath), parsed_text=parsed_text)
+            item_id = ingest_file(str(filepath), parsed_text)
             logging.info(f"Successfully ingested item #{item_id}")
             console.print(
                 Panel(
@@ -98,6 +126,7 @@ def ingest(
                     border_style="green",
                 )
             )
+            
         except DuplicateError as e:
             console.print(
                 Panel(
@@ -111,46 +140,6 @@ def ingest(
         except ValueError as e:
             console.print(f"[red]❌ {e}[/red]")
             raise typer.Exit(code=1)
-        except Exception as e:
-            console.print(f"[red]❌ {e}[/red]")
-            raise typer.Exit(code=1)
-        return
-
-    # Multiple files — parallel via IngestQueue
-    console.print(f"[bold]📦 Queuing {len(resolved)} file(s) for parallel ingestion...[/bold]\n")
-    queue = get_ingest_queue()
-    queue.submit_batch([str(fp) for fp in resolved])
-    results = queue.drain()
-
-    # Summary table
-    table = Table(title="📊 Ingestion Summary", show_lines=True)
-    table.add_column("#", style="dim", width=4)
-    table.add_column("File", style="bold")
-    table.add_column("Status")
-    table.add_column("ID", width=6)
-
-    ingested = duplicates = errors = 0
-    # Map back the vault paths to original paths for display
-    # Results come out in same order as submitted queue
-    for i, (r, orig_fp) in enumerate(zip(results, resolved), 1):
-        name = orig_fp.name
-        if r.is_duplicate:
-            duplicates += 1
-            table.add_row(str(i), name, "[yellow]⚠️  Duplicate[/yellow]", str(r.duplicate_id))
-        elif r.success:
-            ingested += 1
-            table.add_row(str(i), name, "[green]✅ OK[/green]", str(r.item_id))
-        else:
-            errors += 1
-            table.add_row(str(i), name, f"[red]❌ {r.error}[/red]", "—")
-
-    console.print(table)
-    console.print(
-        f"\n[bold]Total:[/bold] {len(results)} | "
-        f"[green]Ingested:[/green] {ingested} | "
-        f"[yellow]Duplicates:[/yellow] {duplicates} | "
-        f"[red]Errors:[/red] {errors}"
-    )
 
 
 @app.command()
