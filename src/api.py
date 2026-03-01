@@ -9,7 +9,7 @@ from typing import List, Optional
 import tempfile
 import uuid
 
-from backend.ingest import ingest_file, DuplicateError, get_ingest_queue, IngestResult
+from backend.ingest import ingest_file, DuplicateError, get_ingest_queue, IngestResult, detect_mime
 from backend.search import search as search_docs
 from backend.db import get_item, get_chunks_for_item
 from backend.connections import get_connections
@@ -34,6 +34,8 @@ class DocumentResult(BaseModel):
     tags: List[str]
     snippet: str
     score: Optional[float] = None
+    source_type: str
+    source_path: str
 
 class DocumentDetail(DocumentResult):
     fullText: str
@@ -75,7 +77,9 @@ def api_search(q: str):
             summary=r.get("summary") or "",
             tags=tags,
             snippet=r.get("snippet") or "",
-            score=r.get("score")
+            score=r.get("score"),
+            source_type=r.get("source_type", "unknown"),
+            source_path=r.get("source_path", "")
         ))
     return docs
 
@@ -90,8 +94,7 @@ def api_ingest(file: UploadFile = File(...)):
         shutil.copyfileobj(file.file, f)
         
     try:
-        mime, _ = mimetypes.guess_type(str(vault_path))
-        mime = mime or "application/octet-stream"
+        mime = detect_mime(str(vault_path))
         
         if mime.startswith("image/"):
             from backend.ocr import extract_text_from_image
@@ -117,10 +120,14 @@ def api_ingest(file: UploadFile = File(...)):
             documentId=str(e.existing_id)
         )
     except ValueError as e:
+        import traceback
+        traceback.print_exc()
         if vault_path.exists():
             os.remove(vault_path)
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         if vault_path.exists():
             os.remove(vault_path)
         raise HTTPException(status_code=500, detail=str(e))

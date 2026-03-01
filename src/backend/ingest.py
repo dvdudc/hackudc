@@ -55,8 +55,14 @@ def get_embeddings_batch(texts: list[str]) -> list[list[float]]:
 
 
 def detect_mime(path: str) -> str:
-    """Detect MIME type using built-in mimetypes library."""
+    """Detect MIME type using built-in mimetypes library, with fallbacks for Windows."""
     mime_type, _ = mimetypes.guess_type(path)
+    if mime_type is None or mime_type == "application/octet-stream":
+        # Fallback for Windows mimetypes registry issues
+        ext = os.path.splitext(path)[1].lower()
+        text_exts = {'.txt', '.md', '.csv', '.json', '.xml', '.py', '.js', '.ts', '.tsx', '.jsx', '.html', '.css', '.yml', '.yaml'}
+        if ext in text_exts:
+            return "text/plain"
     return mime_type or "application/octet-stream"
 
 

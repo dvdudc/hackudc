@@ -19,6 +19,12 @@ import csv
 import sys
 import io
 import logging
+import threading
+
+# Force UTF-8 for Windows consoles to support Emojis
+if sys.stdout.encoding.lower() != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8')
+
 from pathlib import Path
 
 import typer
