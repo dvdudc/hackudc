@@ -106,8 +106,8 @@ def ingest_file(path: str, parsed_text: str, *, _rebuild_indexes: bool = True) -
 
     # 3. MIME Check
     mime = detect_mime(str(filepath))
-    if not (mime.startswith("text/") or mime.startswith("image/") or mime == "application/pdf"):
-        raise ValueError(f"Unsupported file type: {mime}. Only text/*, image/* and application/pdf supported.")
+    if not (mime.startswith("text/") or mime.startswith("image/") or mime.startswith("audio/") or mime == "application/pdf"):
+        raise ValueError(f"Unsupported file type: {mime}. Only text/*, image/*, audio/* and application/pdf supported.")
 
     # 4. Use provided parsed text
     text = parsed_text
@@ -131,7 +131,7 @@ def ingest_file(path: str, parsed_text: str, *, _rebuild_indexes: bool = True) -
     # 7. Store — all DB writes under lock
     with _db_lock:
         mtime = os.path.getmtime(str(filepath))
-        source_type = "pdf" if mime == "application/pdf" else "image" if mime.startswith("image/") else "text"
+        source_type = "pdf" if mime == "application/pdf" else "image" if mime.startswith("image/") else "audio" if mime.startswith("audio/") else "text"
         item_id = db.insert_item(source_path=str(filepath), source_type=source_type, file_hash=file_hash, file_mtime=mtime)
 
         for i, (chunk, vec) in enumerate(zip(chunks, vectors)):
@@ -238,15 +238,22 @@ class IngestQueue:
         """Wrapper que captura excepciones y devuelve un IngestResult."""
         try:
             # We must recreate the text extraction logic for batch processing, as the current CLI passes it in.
-            import mimetypes
-            mime, _ = mimetypes.guess_type(str(path))
-            mime = mime or "application/octet-stream"
+            mime = detect_mime(str(path))
             
             if mime.startswith("image/"):
                 from backend.ocr import extract_text_from_image
                 parsed_text = extract_text_from_image(str(path))
+            elif mime == "application/pdf":
+                from backend.pdf import extract_text_from_pdf
+                parsed_text = extract_text_from_pdf(str(path))
+            elif mime.startswith("audio/"):
+                from backend.stt import extract_text_from_audio
+                parsed_text = extract_text_from_audio(str(path))
             else:
-                parsed_text = Path(path).read_text(encoding="utf-8")
+                try:
+                    parsed_text = Path(path).read_text(encoding="utf-8")
+                except UnicodeDecodeError:
+                    raise ValueError(f"File encoding error. Must be UTF-8: {path}")
                 
             item_id = ingest_file(path, parsed_text=parsed_text, _rebuild_indexes=False)
             return IngestResult(path=path, success=True, item_id=item_id)

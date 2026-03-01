@@ -70,9 +70,8 @@ def ingest(
         try:
             logging.info(f"Ingesting file: {filepath}")
             
-            import mimetypes
-            mime, _ = mimetypes.guess_type(str(filepath))
-            mime = mime or "application/octet-stream"
+            from backend.ingest import detect_mime
+            mime = detect_mime(str(filepath))
             
             if mime.startswith("image/"):
                 from backend.ocr import extract_text_from_image
@@ -80,6 +79,9 @@ def ingest(
             elif mime == "application/pdf":
                 from backend.pdf import extract_text_from_pdf
                 parsed_text = extract_text_from_pdf(str(filepath))
+            elif mime.startswith("audio/"):
+                from backend.stt import extract_text_from_audio
+                parsed_text = extract_text_from_audio(str(filepath))
             else:
                 try:
                     parsed_text = filepath.read_text(encoding="utf-8")
@@ -97,25 +99,19 @@ def ingest(
                 )
             )
         except DuplicateError as e:
-            if os.path.exists(vault_path_str):
-                os.remove(vault_path_str)
             console.print(
                 Panel(
                     f"[yellow]Item #{e.existing_id}[/yellow] already exists.\n"
                     f"Skipping ingestion to save resources.\n"
-                    f"Source: {original_fp}",
+                    f"Source: {filepath}",
                     title="⚠️  Duplicate Detected",
                     border_style="yellow",
                 )
             )
         except ValueError as e:
-            if os.path.exists(vault_path_str):
-                os.remove(vault_path_str)
             console.print(f"[red]❌ {e}[/red]")
             raise typer.Exit(code=1)
         except Exception as e:
-            if os.path.exists(vault_path_str):
-                os.remove(vault_path_str)
             console.print(f"[red]❌ {e}[/red]")
             raise typer.Exit(code=1)
         return
@@ -123,7 +119,7 @@ def ingest(
     # Multiple files — parallel via IngestQueue
     console.print(f"[bold]📦 Queuing {len(resolved)} file(s) for parallel ingestion...[/bold]\n")
     queue = get_ingest_queue()
-    queue.submit_batch([vp for vp, _ in vault_paths])
+    queue.submit_batch([str(fp) for fp in resolved])
     results = queue.drain()
 
     # Summary table
@@ -136,21 +132,17 @@ def ingest(
     ingested = duplicates = errors = 0
     # Map back the vault paths to original paths for display
     # Results come out in same order as submitted queue
-    for i, (r, (_, orig_fp)) in enumerate(zip(results, vault_paths), 1):
+    for i, (r, orig_fp) in enumerate(zip(results, resolved), 1):
         name = orig_fp.name
         if r.is_duplicate:
             duplicates += 1
             table.add_row(str(i), name, "[yellow]⚠️  Duplicate[/yellow]", str(r.duplicate_id))
-            if os.path.exists(r.path):
-                os.remove(r.path)
         elif r.success:
             ingested += 1
             table.add_row(str(i), name, "[green]✅ OK[/green]", str(r.item_id))
         else:
             errors += 1
             table.add_row(str(i), name, f"[red]❌ {r.error}[/red]", "—")
-            if os.path.exists(r.path):
-                os.remove(r.path)
 
     console.print(table)
     console.print(
