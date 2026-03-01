@@ -1,6 +1,7 @@
 duckdb>=1.2.0
 google-genai
 langchain-text-splitters
+langchain-groq
 python-dotenv
 typer[all]
 numpy

@@ -6,11 +6,33 @@ Uses a self-hosted Ollama instance to generate title, tags, and summary for an i
 from __future__ import annotations
 
 import json
-import urllib.request
-import urllib.error
+from pydantic import BaseModel, Field
 
-from backend.config import LLM_MODEL, OLLAMA_HOST
+from backend.config import LLM_MODEL, GROQ_API_KEY
 from backend import db
+from langchain_groq import ChatGroq
+
+class EntitiesInfo(BaseModel):
+    personas: list[str] = Field(default_factory=list)
+    organizaciones: list[str] = Field(default_factory=list)
+    lugares: list[str] = Field(default_factory=list)
+    fechas: list[str] = Field(default_factory=list)
+    conceptos_tecnicos: list[str] = Field(default_factory=list)
+    productos_herramientas: list[str] = Field(default_factory=list)
+
+class ChunkEnrichment(BaseModel):
+    titulo: str = Field(description="Título descriptivo y específico del chunk")
+    resumen: str = Field(description="1-2 oraciones que capturen la idea central")
+    tipo_contenido: str = Field(description="Uno de: tecnico, narrativo, instruccional, referencia, conceptual, codigo, datos, mixto")
+    idioma: str = Field(description="Código ISO 639-1")
+    tags: list[str] = Field(description="Etiquetas conceptuales centrales")
+    terminos_clave_ponderados: dict[str, float] = Field(description="Términos y su importancia (0.0 a 1.0)")
+    densidad_tematica: float = Field(description="Qué tan concentrado está el tema (0.0 a 1.0)")
+    score_relevancia_chunk: float = Field(description="Qué tan autosuficiente y útil es")
+    entidades: EntitiesInfo
+    preguntas_que_responde: list[str] = Field(description="Preguntas que este texto responde")
+    contexto_necesario: str = Field(description="Uno de: autosuficiente, requiere_chunks_anteriores, requiere_chunks_posteriores, requiere_ambos")
+    chunk_posicion: str = Field(description="Uno de: introduccion, desarrollo, conclusion, fragmento_aislado")
 
 ENRICHMENT_PROMPT = """
 Eres un analizador semántico especializado en sistemas RAG (Retrieval-Augmented Generation).
@@ -88,7 +110,12 @@ def enrich_item(item_id: int) -> dict:
     all_tags = []
     chunk_titles = []
     
-    url = f"http://{OLLAMA_HOST}/api/generate"
+    try:
+        model = ChatGroq(model=LLM_MODEL, api_key=GROQ_API_KEY, temperature=0.1)
+        structured_llm = model.with_structured_output(ChunkEnrichment)
+    except Exception as e:
+        print(f"⚠️ Failed to initialize Groq model: {e}")
+        return {}
 
     # Process each chunk
     for i, chunk in enumerate(chunks):
@@ -101,34 +128,9 @@ def enrich_item(item_id: int) -> dict:
             chunk_text=chunk["body"]
         )
         
-        payload = {
-            "model": LLM_MODEL,
-            "prompt": prompt,
-            "stream": False,
-            "format": "json"
-        }
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
-            url, 
-            data=data, 
-            headers={"Content-Type": "application/json"}
-        )
-
         try:
-            with urllib.request.urlopen(req, timeout=300) as response:
-                resp_body = response.read().decode("utf-8")
-                resp_json = json.loads(resp_body)
-                raw = resp_json.get("response", "").strip()
-            
-            # Parse JSON (handle potential markdown code fences)
-            if "```json" in raw:
-                raw = raw.split("```json", 1)[1]
-                raw = raw.split("```", 1)[0]
-            elif raw.startswith("```"):
-                raw = raw.split("\n", 1)[1]
-                raw = raw.rsplit("```", 1)[0]
-            
-            data = json.loads(raw.strip())
+            enriched_data = structured_llm.invoke(prompt)
+            data = enriched_data.model_dump()
             
             # Store metadata
             db.insert_chunk_metadata(chunk["id"], data)
@@ -140,17 +142,9 @@ def enrich_item(item_id: int) -> dict:
                 chunk_titles.append(data["titulo"])
             else:
                 print(f"⚠️  No 'titulo' found in extracted JSON data. Dump: {data}")
-                print(f"RAW OLLAMA RESP: {raw}")
                 
             print(f" ✨ Chunk {i+1}/{total_chunks} enriched: {data.get('titulo')}")
 
-        except json.JSONDecodeError as je:
-            print(f"⚠️ JSON Parse Error: {je}")
-            print(f"RAW OLLAMA RESULT WAS: {raw}")
-            break
-        except urllib.error.URLError as e:
-            print(f"⚠️  Failed to connect to Ollama at {url}: {e}")
-            break
         except Exception as e:
             print(f"⚠️  Enrichment failed for item #{item_id} chunk #{i+1}: {e}")
 

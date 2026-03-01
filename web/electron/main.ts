@@ -29,6 +29,11 @@ let apiProcess: ChildProcess | null = null
 const WIDGET_SIZE = 140
 
 function startBackendApi() {
+    if (app.isPackaged) {
+        console.log("Running in packaged mode. Assuming API is already started by blackvault_run.bat");
+        return;
+    }
+
     const appRoot = process.env.APP_ROOT as string;
     const apiPath = path.join(appRoot, '..', 'src', 'api.py');
     console.log('Starting Python backend at:', apiPath);
