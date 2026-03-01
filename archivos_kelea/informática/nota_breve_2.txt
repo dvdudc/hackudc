@@ -1,0 +1,3 @@
+Revisar diferencias entre SSR, SSG y ISR en Next.js.
+No tengo claro cuándo usar cada uno en un proyecto real.
+Buscar ejemplos prácticos.

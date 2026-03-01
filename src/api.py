@@ -7,11 +7,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 import tempfile
+import uuid
 
-from backend.ingest import ingest_file, DuplicateError
+from backend.ingest import ingest_file, DuplicateError, get_ingest_queue, IngestResult, detect_mime
 from backend.search import search as search_docs
 from backend.db import get_item, get_chunks_for_item
 from backend.connections import get_connections
+
+VAULT_DIR = Path("blackvault_data/files").resolve()
+VAULT_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="Black Vault API")
 
@@ -30,6 +34,8 @@ class DocumentResult(BaseModel):
     tags: List[str]
     snippet: str
     score: Optional[float] = None
+    source_type: str
+    source_path: str
 
 class DocumentDetail(DocumentResult):
     fullText: str
@@ -39,6 +45,19 @@ class IngestResponse(BaseModel):
     success: bool
     message: str
     documentId: str
+
+class BatchIngestItemResponse(BaseModel):
+    filename: str
+    success: bool
+    message: str
+    documentId: Optional[str] = None
+
+class BatchIngestResponse(BaseModel):
+    total: int
+    ingested: int
+    duplicates: int
+    errors: int
+    results: List[BatchIngestItemResponse]
 
 @app.get("/search", response_model=List[DocumentResult])
 def api_search(q: str):
@@ -58,48 +77,127 @@ def api_search(q: str):
             summary=r.get("summary") or "",
             tags=tags,
             snippet=r.get("snippet") or "",
-            score=r.get("score")
+            score=r.get("score"),
+            source_type=r.get("source_type", "unknown"),
+            source_path=r.get("source_path", "")
         ))
     return docs
 
 @app.post("/ingest", response_model=IngestResponse)
 def api_ingest(file: UploadFile = File(...)):
-    # Save to a temporary file for ingestion
-    fd, temp_path = tempfile.mkstemp(suffix=f"_{file.filename}")
+    # Save to a permanent vault directory for ingestion
+    safe_filename = file.filename.replace(" ", "_").replace("/", "_").replace("\\", "_")
+    unique_filename = f"{uuid.uuid4().hex}_{safe_filename}"
+    vault_path = VAULT_DIR / unique_filename
+    
+    with open(vault_path, 'wb') as f:
+        shutil.copyfileobj(file.file, f)
+        
     try:
-        with os.fdopen(fd, 'wb') as f:
-            shutil.copyfileobj(file.file, f)
-            
-        try:
-            mime, _ = mimetypes.guess_type(temp_path)
-            mime = mime or "application/octet-stream"
-            
-            if mime.startswith("image/"):
-                from backend.ocr import extract_text_from_image
-                parsed_text = extract_text_from_image(temp_path)
+        mime = detect_mime(str(vault_path))
+        
+        if mime.startswith("image/"):
+            from backend.ocr import extract_text_from_image
+            parsed_text = extract_text_from_image(str(vault_path))
+        else:
+            try:
+                parsed_text = vault_path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                raise ValueError("File encoding error. Must be UTF-8.")
+                
+        item_id = ingest_file(str(vault_path), parsed_text)
+        return IngestResponse(
+            success=True,
+            message="Document successfully ingested.",
+            documentId=str(item_id)
+        )
+    except DuplicateError as e:
+        if vault_path.exists():
+            os.remove(vault_path)
+        return IngestResponse(
+            success=True,
+            message="Document already exists.",
+            documentId=str(e.existing_id)
+        )
+    except ValueError as e:
+        import traceback
+        traceback.print_exc()
+        if vault_path.exists():
+            os.remove(vault_path)
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        if vault_path.exists():
+            os.remove(vault_path)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/ingest/batch", response_model=BatchIngestResponse)
+def api_ingest_batch(files: List[UploadFile] = File(...)):
+    """Ingest multiple files in parallel using the IngestQueue."""
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided.")
+
+    # Save all uploaded files to Vault paths
+    vault_paths: list[tuple[str, str]] = []  # (vault_path, original_filename)
+    import uuid
+    for uploaded in files:
+        safe_filename = (uploaded.filename or "unknown").replace(" ", "_").replace("/", "_").replace("\\", "_")
+        unique_filename = f"{uuid.uuid4().hex}_{safe_filename}"
+        vault_path = VAULT_DIR / unique_filename
+        
+        with open(vault_path, 'wb') as f:
+            shutil.copyfileobj(uploaded.file, f)
+        vault_paths.append((str(vault_path), uploaded.filename or "unknown"))
+
+    try:
+        # Submit all to the queue and drain
+        queue = get_ingest_queue()
+        queue.submit_batch([vp for vp, _ in vault_paths])
+        results = queue.drain()
+
+        # Build response & cleanup failed/duplicate vault files
+        item_responses: list[BatchIngestItemResponse] = []
+        ingested = duplicates = errors = 0
+
+        for r, (_, orig_name) in zip(results, vault_paths):
+            if r.is_duplicate:
+                duplicates += 1
+                item_responses.append(BatchIngestItemResponse(
+                    filename=orig_name, success=True,
+                    message="Document already exists.",
+                    documentId=str(r.duplicate_id),
+                ))
+                if os.path.exists(r.path):
+                    os.remove(r.path)
+            elif r.success:
+                ingested += 1
+                item_responses.append(BatchIngestItemResponse(
+                    filename=orig_name, success=True,
+                    message="Document successfully ingested.",
+                    documentId=str(r.item_id),
+                ))
             else:
-                try:
-                    parsed_text = Path(temp_path).read_text(encoding="utf-8")
-                except UnicodeDecodeError:
-                    raise ValueError("File encoding error. Must be UTF-8.")
-                    
-            item_id = ingest_file(temp_path, parsed_text)
-            return IngestResponse(
-                success=True,
-                message="Document successfully ingested.",
-                documentId=str(item_id)
-            )
-        except DuplicateError as e:
-            return IngestResponse(
-                success=True,
-                message="Document already exists.",
-                documentId=str(e.existing_id)
-            )
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-    finally:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+                errors += 1
+                item_responses.append(BatchIngestItemResponse(
+                    filename=orig_name, success=False,
+                    message=r.error or "Unknown error.",
+                ))
+                if os.path.exists(r.path):
+                    os.remove(r.path)
+
+        return BatchIngestResponse(
+            total=len(files),
+            ingested=ingested, duplicates=duplicates, errors=errors,
+            results=item_responses,
+        )
+    except Exception as e:
+        # For catastrophic failures, clean up everything
+        for vp, _ in vault_paths:
+            if os.path.exists(vp):
+                os.remove(vp)
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/document/{doc_id}", response_model=DocumentDetail)
 def api_get_document(doc_id: str):

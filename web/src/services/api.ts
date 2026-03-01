@@ -5,6 +5,8 @@ export interface DocumentResult {
     tags: string[];
     snippet: string;
     score?: number;
+    source_type: string;
+    source_path: string;
 }
 
 export interface DocumentDetail extends DocumentResult {
@@ -29,7 +31,8 @@ export const vaultApi = {
 
         const response = await fetch(`${API_BASE}/search?q=${encodeURIComponent(query)}`);
         if (!response.ok) {
-            throw new Error(`Search failed: ${response.statusText}`);
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.detail || `Search failed: ${response.statusText}`);
         }
 
         return response.json();
@@ -40,7 +43,7 @@ export const vaultApi = {
      */
     ingest: async (file: File): Promise<IngestResponse> => {
         const formData = new FormData();
-        formData.append("file", file);
+        formData.append("file", file, file.name || "document.txt");
 
         const response = await fetch(`${API_BASE}/ingest`, {
             method: "POST",
@@ -48,7 +51,8 @@ export const vaultApi = {
         });
 
         if (!response.ok) {
-            throw new Error(`Ingest failed: ${response.statusText}`);
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.detail || `Ingest failed: ${response.statusText}`);
         }
 
         return response.json();
@@ -61,7 +65,8 @@ export const vaultApi = {
         const response = await fetch(`${API_BASE}/document/${encodeURIComponent(id)}`);
 
         if (!response.ok) {
-            throw new Error(`Get detail failed: ${response.statusText}`);
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.detail || `Get detail failed: ${response.statusText}`);
         }
 
         return response.json();

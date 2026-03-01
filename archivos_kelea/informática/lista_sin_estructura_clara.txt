@@ -1,0 +1,5 @@
+Cosas pendientes:
+Configurar Docker
+Mirar logs de error del servidor
+Optimizar consulta a base de datos
+Investigar por qué falla el login en móvil

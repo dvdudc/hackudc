@@ -1,0 +1,6 @@
+- [ ] Preparar demo del hackathon
+- [ ] Revisar seguridad básica del backend
+- [ ] Añadir validación de inputs en formularios
+- [ ] Implementar guardado en Markdown
+- [ ] Probar con 50 notas simuladas
+- [ ] Escribir README explicando el flujo humano-sistema
