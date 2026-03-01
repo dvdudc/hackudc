@@ -165,6 +165,14 @@ def enrich_item(item_id: int) -> dict:
     
     final_summary = f"Doc aggregated from {total_chunks} chunk(s)."
     
-    db.update_item_enrichment(item_id, final_title, tags_str, final_summary)
+    metadata_text = f"Tags: {tags_str}\nSummary: {final_summary}"
+    try:
+        from backend.ingest import get_embedding
+        metadata_vector = get_embedding(metadata_text)
+    except Exception as e:
+        print(f"⚠️  Failed to generate metadata vector for item #{item_id}: {e}")
+        metadata_vector = None
+
+    db.update_item_enrichment(item_id, final_title, tags_str, final_summary, metadata_vector)
     print(f"🏷️  Enriched item #{item_id}: \"{final_title}\"")
-    return {"title": final_title, "tags": tags_str, "summary": final_summary}
+    return {"title": final_title, "tags": tags_str, "summary": final_summary, "metadata_vector": metadata_vector}

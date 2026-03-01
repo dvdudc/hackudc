@@ -1,0 +1,4 @@
+Revisar mejor cómo funcionan los hooks de React
+Estudiar las diferencias entre los hooks de React y los lifecycle hooks de Angular
+¿En React existe la inyección de dependencias?
+¿Es recomendable usar POO en React?

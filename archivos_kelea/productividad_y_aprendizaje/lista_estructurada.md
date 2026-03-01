@@ -1,0 +1,5 @@
+- [ ] Leer capítulo 3 del libro de arquitectura
+- [ ] Hacer resumen en Markdown
+- [ ] Crear mapa mental
+- [ ] Revisar en 48 horas
+- [ ] Aplicar técnica Feynman

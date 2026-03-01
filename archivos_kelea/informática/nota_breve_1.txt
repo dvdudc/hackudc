@@ -1,0 +1,4 @@
+Idea: montar un sistema de feature flags simple para el proyecto del hackathon.
+Quizá usar algo basado en JSON + middleware en Express.
+Importante que permita activar/desactivar features por usuario.
+Revisar cómo lo hace LaunchDarkly pero versión casera.

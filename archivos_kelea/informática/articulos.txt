@@ -1,0 +1,15 @@
+https://es.react.dev/reference/react
+
+https://es.react.dev/reference/react/hooks
+
+https://es.wikipedia.org/wiki/Patrones_de_arquitectura
+
+https://adictosaltrabajo.com/2024/07/22/patrones-de-arquitectura/
+
+https://www.paradigmadigital.com/dev/patrones-arquitectura-microservicios-que-son-ventajas/
+
+https://micro-frontends-es.org/
+
+https://elpythonista.com/analisis-clean-code
+
+https://lenguajejs.com/javascript/introduccion/que-es-javascript/
