@@ -65,15 +65,16 @@ def search(query: str, limit: int = 10, use_enrichment: bool = True) -> list[dic
                 sql_filter = " AND ".join(clauses)
 
             # ── TEMPORAL BYPASS ──────────────────────────────────────
-            # If the query has a date filter OR is purely metadata
-            # (file_type/tags only, no real search content), bypass hybrid.
+            # Only bypass hybrid when intent is EXPLICITLY metadata_filter
+            # AND we have actionable SQL clauses (date, type, or tags).
             has_date_filter = intent_data.filters.created_after is not None
             is_pure_metadata = (
                 intent_data.intent == "metadata_filter"
                 and clauses
                 and (not parsed_sem or len(parsed_sem) < 3)
             )
-            if has_date_filter or is_pure_metadata:
+            should_bypass = intent_data.intent == "metadata_filter" and has_date_filter
+            if should_bypass or is_pure_metadata:
                 logging.info(f"Temporal bypass: pure metadata query, skipping hybrid search.")
                 rows = con.execute(
                     f"""
@@ -87,13 +88,23 @@ def search(query: str, limit: int = 10, use_enrichment: bool = True) -> list[dic
                     params + [limit],
                 ).fetchall()
                 results = []
+                from datetime import datetime
+                now = datetime.now()
                 for row in rows:
+                    created = row[5]
+                    # Compute recency score: 1.0 for now, decaying over 7 days
+                    if created is not None:
+                        delta = (now - created).total_seconds()
+                        recency = max(0.0, 1.0 - delta / (7 * 24 * 3600))
+                    else:
+                        recency = 0.0
                     results.append({
                         "item_id": row[0],
                         "title": row[1] or "(sin título)",
-                        "score": 1.0,
+                        "score": round(recency, 3),
                         "snippet": f"📁 {row[4]} | 🏷️ {row[2] or '—'} | 📝 {row[3] or '—'}",
                     })
+                results.sort(key=lambda x: x["score"], reverse=True)
                 return results
 
         except Exception as e:
@@ -261,7 +272,16 @@ def search(query: str, limit: int = 10, use_enrichment: bool = True) -> list[dic
         else:
             l_score_norm = 0.0
 
-        # We weight semantic search slightly higher (0.6) than lexical (0.4)
+        # Penalise short/untitled docs: scale down BM25 contribution
+        # Short snippets get inflated BM25 scores — dampen them
+        lex_snippet = lexical.get(item_id, {}).get("snippet", "")
+        snippet_len = len(lex_snippet)
+        if snippet_len < 50:
+            l_score_norm *= 0.3   # heavy penalty for very short docs
+        elif snippet_len < 150:
+            l_score_norm *= 0.7   # moderate penalty
+
+        # We weight semantic search higher (0.6) than lexical (0.4)
         combined = (s_score * 0.6) + (l_score_norm * 0.4)
 
         # Pick the best snippet (prefer semantic if available, else lexical)
@@ -274,6 +294,9 @@ def search(query: str, limit: int = 10, use_enrichment: bool = True) -> list[dic
         })
 
     results.sort(key=lambda x: x["score"], reverse=True)
+    
+    # ── Score threshold: filter out low-quality results ───────────────
+    results = [r for r in results if r["score"] >= 0.1]
     top_results = results[:limit]
 
     # Fetch titles
