@@ -7,11 +7,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 import tempfile
+import uuid
 
 from backend.ingest import ingest_file, DuplicateError, get_ingest_queue, IngestResult
 from backend.search import search as search_docs
 from backend.db import get_item, get_chunks_for_item
 from backend.connections import get_connections
+
+VAULT_DIR = Path("blackvault_data/files").resolve()
+VAULT_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="Black Vault API")
 
@@ -77,42 +81,49 @@ def api_search(q: str):
 
 @app.post("/ingest", response_model=IngestResponse)
 def api_ingest(file: UploadFile = File(...)):
-    # Save to a temporary file for ingestion
-    fd, temp_path = tempfile.mkstemp(suffix=f"_{file.filename}")
+    # Save to a permanent vault directory for ingestion
+    safe_filename = file.filename.replace(" ", "_").replace("/", "_").replace("\\", "_")
+    unique_filename = f"{uuid.uuid4().hex}_{safe_filename}"
+    vault_path = VAULT_DIR / unique_filename
+    
+    with open(vault_path, 'wb') as f:
+        shutil.copyfileobj(file.file, f)
+        
     try:
-        with os.fdopen(fd, 'wb') as f:
-            shutil.copyfileobj(file.file, f)
-            
-        try:
-            mime, _ = mimetypes.guess_type(temp_path)
-            mime = mime or "application/octet-stream"
-            
-            if mime.startswith("image/"):
-                from backend.ocr import extract_text_from_image
-                parsed_text = extract_text_from_image(temp_path)
-            else:
-                try:
-                    parsed_text = Path(temp_path).read_text(encoding="utf-8")
-                except UnicodeDecodeError:
-                    raise ValueError("File encoding error. Must be UTF-8.")
-                    
-            item_id = ingest_file(temp_path, parsed_text)
-            return IngestResponse(
-                success=True,
-                message="Document successfully ingested.",
-                documentId=str(item_id)
-            )
-        except DuplicateError as e:
-            return IngestResponse(
-                success=True,
-                message="Document already exists.",
-                documentId=str(e.existing_id)
-            )
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-    finally:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+        mime, _ = mimetypes.guess_type(str(vault_path))
+        mime = mime or "application/octet-stream"
+        
+        if mime.startswith("image/"):
+            from backend.ocr import extract_text_from_image
+            parsed_text = extract_text_from_image(str(vault_path))
+        else:
+            try:
+                parsed_text = vault_path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                raise ValueError("File encoding error. Must be UTF-8.")
+                
+        item_id = ingest_file(str(vault_path), parsed_text)
+        return IngestResponse(
+            success=True,
+            message="Document successfully ingested.",
+            documentId=str(item_id)
+        )
+    except DuplicateError as e:
+        if vault_path.exists():
+            os.remove(vault_path)
+        return IngestResponse(
+            success=True,
+            message="Document already exists.",
+            documentId=str(e.existing_id)
+        )
+    except ValueError as e:
+        if vault_path.exists():
+            os.remove(vault_path)
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        if vault_path.exists():
+            os.remove(vault_path)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/ingest/batch", response_model=BatchIngestResponse)
