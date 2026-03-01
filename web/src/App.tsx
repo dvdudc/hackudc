@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { BlackHole } from '@/components/BlackHole';
 import { SearchBar } from '@/components/SearchBar';
 import { SearchResults } from '@/components/SearchResults';
 import { DocumentDetail } from '@/components/DocumentDetail';
+import { WidgetMenu } from '@/components/WidgetMenu';
 import { useVaultApi } from '@/hooks/useVaultApi';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -18,16 +20,17 @@ function App() {
     resetStates
   } = useVaultApi();
 
+  const [isWidgetMode, setIsWidgetMode] = useState(true);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+
   // Clear detail panel helper
   const handleCloseDetail = () => {
-    // Only resetting the detail state visually here, 
-    // real app might need a dedicated clearDetail in hook
     document.body.style.overflow = 'auto'; // restore scroll
     resetStates();
   };
 
   const handleSelectDocument = async (id: string) => {
-    document.body.style.overflow = 'hidden'; // prevent bg scatter while detail open
+    document.body.style.overflow = 'hidden';
     await getDetail(id);
   };
 
@@ -38,99 +41,168 @@ function App() {
   const handleFileDrop = async (file: File) => {
     try {
       await ingest(file);
-      // Automatically search or refresh context after ingestion in a real scenario
-      // search("latest dataset"); 
     } catch (err) {
       console.error(err);
     }
   };
 
+  // Prevent default window drag behavior to allow file drops
+  const stopDragDefault = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleTextSubmit = async (text: string) => {
+    // Treat the text as a seach query per user request "para preguntarle al agujero negro"
+    search(text);
+    handleExpand();
+  };
+
+  const handleExpand = () => {
+    setIsWidgetMode(false);
+    setIsMenuOpen(false);
+    if (window.ipcRenderer) {
+      window.ipcRenderer.send('window-expand');
+    }
+  };
+
+  const handleShrink = () => {
+    setIsWidgetMode(true);
+    setIsMenuOpen(false);
+    if (window.ipcRenderer) {
+      window.ipcRenderer.send('window-shrink');
+    }
+  };
+
+  const handleExit = () => {
+    if (window.ipcRenderer) {
+      window.ipcRenderer.send('window-close');
+    }
+  };
+
+  const handleBlackHoleClick = () => {
+    if (isWidgetMode) {
+      setIsMenuOpen(true);
+    }
+  };
+
   return (
-    <div className="h-screen w-screen overflow-hidden bg-black text-white selection:bg-white/30 font-sans relative flex flex-col items-center">
+    <>
+      <style>{`
+        ::-webkit-scrollbar { display: none !important; }
+        * { scrollbar-width: none !important; -ms-overflow-style: none !important; }
+        body, html { overflow: hidden !important; margin: 0; padding: 0; width: 100%; height: 100%; }
+      `}</style>
 
-      {/* Background ambient noise/gradient */}
-      <div className="fixed inset-0 pointer-events-none z-0">
-        <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-white/5 rounded-full blur-[150px]" />
-        <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-white/5 rounded-full blur-[150px]" />
-      </div>
+      {/* The main window is always transparent and un-draggable. */}
+      {/* It spans the whole Electron given width/height. */}
+      <div className="w-screen h-screen overflow-hidden bg-transparent flex items-end justify-end relative pointer-events-none">
 
-      <header className="w-full max-w-7xl mx-auto p-4 md:p-6 relative z-10 flex justify-between items-center h-16 shrink-0">
-        <h1 className="text-xl font-bold tracking-widest uppercase text-white/90">
-          Black Vault
-        </h1>
-        <div className="font-mono text-xs text-white/40 flex items-center gap-4">
-          <span className="flex items-center gap-2">
-            <span className={`w-2 h-2 rounded-full ${ingestState === 'processing' ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500'}`} />
-            API STATUS:
-            {ingestState === 'processing' ? ' INGESTING' :
-              searchState === 'processing' ? ' SEARCHING' : ' ONLINE'}
-          </span>
-        </div>
-      </header>
+        {/* Expanded Content (Left Side) */}
+        <AnimatePresence>
+          {!isWidgetMode && (
+            <motion.div
+              initial={{ opacity: 0, x: 50, width: 0 }}
+              animate={{ opacity: 1, x: 0, width: '100%' }}
+              exit={{ opacity: 0, x: 50, width: 0 }}
+              transition={{ type: "spring", stiffness: 300, damping: 30 }}
+              className="h-[calc(100%-2rem)] flex-1 mr-4 mb-4 ml-4 bg-black/80 backdrop-blur-xl rounded-2xl border border-white/10 shadow-2xl flex flex-col pointer-events-auto overflow-hidden relative"
+            >
+              {/* Expanded Header */}
+              <header className="w-full p-4 border-b border-white/5 flex justify-between items-center shrink-0">
+                <h1 className="text-sm font-bold tracking-widest uppercase text-white/90">
+                  Black Vault
+                </h1>
+                <div className="flex items-center gap-4">
+                  <div className="font-mono text-[10px] text-white/40 flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full ${ingestState === 'processing' ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500'}`} />
+                    {ingestState === 'processing' ? 'INGESTING' : searchState === 'processing' ? 'SEARCHING' : 'ONLINE'}
+                  </div>
+                  <button
+                    onClick={handleShrink}
+                    className="text-white/40 hover:text-white transition-colors"
+                    title="Minimize"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m8 3 4 8 5-5 5 15H2L8 3z" /></svg>
+                  </button>
+                  <button
+                    onClick={handleExit}
+                    className="text-white/40 hover:text-red-400 transition-colors"
+                    title="Close App"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+                  </button>
+                </div>
+              </header>
 
-      <AnimatePresence>
-        <main className="flex-1 w-full max-w-[1600px] mx-auto flex overflow-hidden relative z-10">
+              {/* Split layout: Search Bar (Left) and Results (Right) */}
+              <div className="flex-1 flex overflow-hidden">
+                {/* Search Column */}
+                <div className="w-1/2 p-4 flex flex-col items-center justify-center border-r border-white/5 relative">
+                  <div className="w-full max-w-sm">
+                    <SearchBar
+                      onSearch={handleSearch}
+                      isSearching={searchState === 'processing'}
+                    />
+                    {searchState === 'error' && (
+                      <div className="text-red-400 font-mono text-xs mt-4 border border-red-500/20 bg-red-500/10 p-2 rounded text-center">
+                        Error accessing the void.
+                      </div>
+                    )}
+                  </div>
+                </div>
 
-          {/* Left Side: Black Hole & Search - Animates width depending on results */}
-          <motion.div
-            layout
-            className="flex flex-col items-center justify-center relative h-full shrink-0 -mt-24"
-            animate={{
-              width: searchResults.length > 0 ? '50%' : '100%',
-            }}
-            transition={{ type: "spring", stiffness: 200, damping: 25 }}
-          >
-            <div className="w-full relative max-w-2xl px-4">
-              <BlackHole
-                onFileDrop={handleFileDrop}
-                isProcessing={ingestState === 'processing'}
-              />
-
-              <div className="absolute bottom-[-2rem] left-1/2 -translate-x-1/2 w-full px-4">
-                <SearchBar
-                  onSearch={handleSearch}
-                  isSearching={searchState === 'processing'}
-                />
+                {/* Results Column */}
+                <div className="w-1/2 overflow-y-auto p-4 custom-scrollbar relative">
+                  <SearchResults
+                    results={searchResults}
+                    onSelect={handleSelectDocument}
+                  />
+                </div>
               </div>
 
-              {/* Global Error State under search bar */}
-              {searchState === 'error' && (
-                <div className="text-red-400 font-mono text-sm mt-12 border border-red-500/20 bg-red-500/10 px-4 py-2 rounded text-center">
-                  Error accessing the void. Connection lost.
-                </div>
-              )}
-            </div>
-          </motion.div>
+              {/* Detail Overlay */}
+              <DocumentDetail
+                document={currentDetail}
+                isOpen={detailState === 'success' && currentDetail !== null}
+                onClose={handleCloseDetail}
+                onSelectConnection={handleSelectDocument}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-          {/* Right Side: Search Results Scrollable Area */}
-          <AnimatePresence>
-            {searchResults.length > 0 && (
-              <motion.div
-                initial={{ opacity: 0, x: 100 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 100 }}
-                transition={{ type: "spring", stiffness: 200, damping: 25, delay: 0.1 }}
-                className="w-[50%] h-full overflow-y-auto overflow-x-hidden p-6 custom-scrollbar shrink-0"
-              >
-                <SearchResults
-                  results={searchResults}
-                  onSelect={handleSelectDocument}
-                />
-              </motion.div>
-            )}
-          </AnimatePresence>
 
-        </main>
-      </AnimatePresence>
+        {/* The Black hole block (Right Side Anchor) */}
+        {/* Fixed 140x140 size to match the original collapsed window size */}
+        <div
+          className="w-[140px] h-[140px] shrink-0 flex items-center justify-center relative pointer-events-auto"
+          onDragEnter={stopDragDefault}
+          onDragOver={stopDragDefault}
+          onDragLeave={stopDragDefault}
+          onDrop={stopDragDefault}
+        >
+          <BlackHole
+            onFileDrop={handleFileDrop}
+            isProcessing={ingestState === 'processing'}
+            onClick={handleBlackHoleClick}
+            isWidgetMode={isWidgetMode}
+          />
 
-      <DocumentDetail
-        document={currentDetail}
-        isOpen={detailState === 'success' && currentDetail !== null}
-        onClose={handleCloseDetail}
-        onSelectConnection={handleSelectDocument}
-      />
+          {/* The Menu overlay for the Black Hole */}
+          <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-40">
+            <WidgetMenu
+              isOpen={isMenuOpen}
+              onClose={() => setIsMenuOpen(false)}
+              onExpand={handleExpand}
+              onExit={handleExit}
+              onTextSubmit={handleTextSubmit}
+            />
+          </div>
+        </div>
 
-    </div>
+      </div>
+    </>
   );
 }
 

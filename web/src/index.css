@@ -6,8 +6,6 @@
 }
 
 :root {
-  background-color: #000000;
-  color: #ffffff;
   color-scheme: dark;
 }
 
@@ -15,11 +13,19 @@ body {
   margin: 0;
   height: 100vh;
   width: 100vw;
-  background-color: #000000;
   overflow: hidden;
+  background-color: transparent;
 }
 
 @layer utilities {
+  .drag-region {
+    -webkit-app-region: drag;
+  }
+
+  .no-drag {
+    -webkit-app-region: no-drag;
+  }
+
   .custom-scrollbar::-webkit-scrollbar {
     width: 6px;
   }
