@@ -238,7 +238,7 @@ def show(
     item_id: int = typer.Argument(..., help="Item ID to display."),
 ):
     """Show details of a specific item, including connections."""
-    from backend.db import get_item, get_chunks_for_item
+    from backend.db import get_item, get_chunks_for_item, log_item_view
     from backend.connections import get_connections
 
     logging.info(f"Showing details for item #{item_id}")
@@ -246,6 +246,9 @@ def show(
     if item is None:
         console.print(f"[red]❌ Item #{item_id} not found.[/red]")
         raise typer.Exit(code=1)
+        
+    # Log the view for session context
+    log_item_view(item_id)
 
     # ── Item details ─────────────────────────────────────────────────
     title = item.get("title") or "(sin título)"
