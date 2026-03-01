@@ -20,6 +20,19 @@ export interface IngestResponse {
     documentId: string;
 }
 
+export interface ConsolidateResultItem {
+    title: string;
+    new_id: number;
+    merged_count: number;
+    deleted_ids: number[];
+}
+
+export interface ConsolidateResponse {
+    success: boolean;
+    message: string;
+    results: ConsolidateResultItem[];
+}
+
 const API_BASE = "http://localhost:8000";
 
 export const vaultApi = {
@@ -120,6 +133,22 @@ export const vaultApi = {
         if (!response.ok) {
             const err = await response.json().catch(() => ({}));
             throw new Error(err.detail || `Add tag failed: ${response.statusText}`);
+        }
+
+        return response.json();
+    },
+
+    /**
+     * Consolidate small semantic notes
+     */
+    consolidate: async (): Promise<ConsolidateResponse> => {
+        const response = await fetch(`${API_BASE}/consolidate`, {
+            method: 'POST',
+        });
+
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.detail || `Consolidation failed: ${response.statusText}`);
         }
 
         return response.json();

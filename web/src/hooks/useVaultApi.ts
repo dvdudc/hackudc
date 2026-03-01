@@ -9,6 +9,7 @@ export function useVaultApi() {
     const [ingestState, setIngestState] = useState<RequestState>('idle');
     const [detailState, setDetailState] = useState<RequestState>('idle');
     const [deleteState, setDeleteState] = useState<RequestState>('idle');
+    const [consolidateState, setConsolidateState] = useState<RequestState>('idle');
 
     const [searchResults, setSearchResults] = useState<DocumentResult[]>([]);
     const [currentDetail, setCurrentDetail] = useState<DocumentDetail | null>(null);
@@ -101,10 +102,25 @@ export function useVaultApi() {
         }
     }, []);
 
+    const runConsolidate = useCallback(async () => {
+        try {
+            setConsolidateState('processing');
+            setError(null);
+            const response = await vaultApi.consolidate();
+            setConsolidateState('success');
+            return response;
+        } catch (err) {
+            setError('Failed to consolidate notes.');
+            setConsolidateState('error');
+            throw err;
+        }
+    }, []);
+
     const resetStates = useCallback(() => {
         setSearchState('idle');
         setIngestState('idle');
         setDetailState('idle');
+        setConsolidateState('idle');
         setError(null);
     }, []);
 
@@ -113,6 +129,7 @@ export function useVaultApi() {
         ingestState,
         detailState,
         deleteState,
+        consolidateState,
         searchResults,
         currentDetail,
         error,
@@ -122,6 +139,7 @@ export function useVaultApi() {
         addTag,
         getDetail,
         removeDocument,
+        runConsolidate,
         resetStates
     };
 }

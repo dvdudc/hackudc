@@ -17,9 +17,11 @@ function App() {
     searchResults,
     searchState,
     ingestState,
+    consolidateState,
     currentDetail,
     detailState,
     removeDocument,
+    runConsolidate,
     resetStates
   } = useVaultApi();
 
@@ -179,6 +181,24 @@ function App() {
       if (query) {
         search(query, true);
         handleExpand();
+      }
+      return;
+    }
+
+    // >c or >consolidate command: Trigger note consolidation
+    if (trimmed === '>c' || trimmed === '>consolidate') {
+      try {
+        const result = await runConsolidate();
+        if (result.results && result.results.length > 0) {
+          alert(result.message);
+        } else {
+          // You could optionally show "No notes were consolidated" but keeping it silent unless it works is cleaner
+        }
+        setIsMenuOpen(false);
+        setForceInputOpen(false);
+      } catch (err) {
+        console.error('Error in consolidation:', err);
+        alert('Error consolidando notas: ' + (err as Error).message);
       }
       return;
     }

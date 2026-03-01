@@ -65,6 +65,17 @@ class BatchIngestResponse(BaseModel):
     errors: int
     results: List[BatchIngestItemResponse]
 
+class ConsolidateResultItem(BaseModel):
+    title: str
+    new_id: int
+    merged_count: int
+    deleted_ids: List[int]
+
+class ConsolidateResponse(BaseModel):
+    success: bool
+    message: str
+    results: List[ConsolidateResultItem]
+
 @app.get("/search", response_model=List[DocumentResult])
 def api_search(q: str, strict: bool = False):
     if not q.strip():
@@ -338,6 +349,38 @@ def api_add_tag(doc_id: str, req: TagRequest):
         raise HTTPException(status_code=404, detail="Document not found or update failed")
         
     return DeleteResponse(success=True, message=f"Tag '{req.tag}' added to document {item_id}.")
+
+@app.post("/consolidate", response_model=ConsolidateResponse)
+def api_consolidate():
+    from backend.consolidate import run_consolidation
+    try:
+        results = run_consolidation()
+        
+        if not results:
+            return ConsolidateResponse(
+                success=True,
+                message="No notes were consolidated.",
+                results=[]
+            )
+            
+        formatted_results = [
+            ConsolidateResultItem(
+                title=r["title"],
+                new_id=r["new_id"],
+                merged_count=r["merged_count"],
+                deleted_ids=r["deleted_ids"]
+            ) for r in results
+        ]
+        
+        return ConsolidateResponse(
+            success=True,
+            message=f"Consolidated {len(results)} groups of notes.",
+            results=formatted_results
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn
