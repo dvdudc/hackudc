@@ -30,6 +30,7 @@ ENV/
 # Database
 *.duckdb
 *.duckdb.wal
+blackvault_data
 # Project specific
 src/ejemplo.txt
 src/ejemplo_palabra.txt

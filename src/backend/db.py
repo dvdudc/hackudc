@@ -267,6 +267,38 @@ def update_item_enrichment(item_id: int, title: str, tags: str, summary: str, me
         [title, tags, summary, item_id],
     )
 
+def delete_item(item_id: int) -> bool:
+    """Delete an item and all its associated data from the database."""
+    con = get_connection()
+    try:
+        # Delete dependencies first
+        con.execute("DELETE FROM session_history WHERE item_id = ?;", [item_id])
+        con.execute("DELETE FROM item_embeddings WHERE item_id = ?;", [item_id])
+        con.execute("DELETE FROM connections WHERE item_a = ? OR item_b = ?;", [item_id, item_id])
+        
+        # We need content_ids to delete embeddings and chunk_metadata
+        content_ids = [r[0] for r in con.execute("SELECT id FROM content WHERE item_id = ?;", [item_id]).fetchall()]
+        if content_ids:
+            placeholders = ",".join(["?"] * len(content_ids))
+            con.execute(f"DELETE FROM embeddings WHERE content_id IN ({placeholders});", content_ids)
+            con.execute(f"DELETE FROM chunk_metadata WHERE content_id IN ({placeholders});", content_ids)
+            
+        con.execute("DELETE FROM content WHERE item_id = ?;", [item_id])
+        
+        # Delete item itself
+        result = con.execute("DELETE FROM items WHERE id = ?;", [item_id])
+        deleted = result.rowcount > 0
+        
+        # Rebuild indexes since content was removed
+        if deleted:
+            create_hnsw_index(con)
+            create_fts_index(con)
+            
+        return deleted
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return False
 
 def _row_to_dict(cursor, row: tuple) -> dict:
     """Convert a single duckdb row to a dict using cursor description."""
