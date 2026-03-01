@@ -137,10 +137,15 @@ def init_schema(con: duckdb.DuckDBPyConnection) -> None:
     """)
 
 
-def create_hnsw_index(con: duckdb.DuckDBPyConnection | None = None) -> None:
+def create_hnsw_index(con: duckdb.DuckDBPyConnection | None = None, force_rebuild: bool = False) -> None:
     """Create the HNSW index on embeddings."""
     if con is None:
         con = get_connection()
+    if force_rebuild:
+        try:
+            con.execute("DROP INDEX IF EXISTS emb_idx;")
+        except Exception:
+            pass
     try:
         con.execute(
             "CREATE INDEX IF NOT EXISTS emb_idx "
@@ -199,13 +204,24 @@ def insert_content(item_id: int, chunk_index: int, body: str) -> int:
 
 
 def insert_embedding(content_id: int, item_id: int, vector: list[float]) -> int:
-    """Insert an embedding and return its id."""
+    """Insert an embedding and return its id. Includes self-healing for HNSW index corruption."""
     con = get_connection()
-    result = con.execute(
-        "INSERT INTO embeddings (content_id, item_id, vector) VALUES (?, ?, ?) RETURNING id;",
-        [content_id, item_id, vector],
-    ).fetchone()
-    return result[0]
+    try:
+        result = con.execute(
+            "INSERT INTO embeddings (content_id, item_id, vector) VALUES (?, ?, ?) RETURNING id;",
+            [content_id, item_id, vector],
+        ).fetchone()
+        return result[0]
+    except Exception as e:
+        if "Duplicate keys" in str(e) or "HNSW" in str(e) or "Constraint Error" in str(e):
+            print("Detected HNSW index corruption during insertion. Auto-rebuilding index and retrying...")
+            create_hnsw_index(con, force_rebuild=True)
+            result = con.execute(
+                "INSERT INTO embeddings (content_id, item_id, vector) VALUES (?, ?, ?) RETURNING id;",
+                [content_id, item_id, vector],
+            ).fetchone()
+            return result[0]
+        raise e
 
 def insert_chunk_metadata(content_id: int, meta: dict) -> None:
     """Insert JSON metadata parsed from LLM for a specific chunk."""
@@ -312,7 +328,7 @@ def delete_item(item_id: int) -> bool:
         
         # Rebuild indexes since content was removed
         if deleted:
-            create_hnsw_index(con)
+            create_hnsw_index(con, force_rebuild=True)
             create_fts_index(con)
             
         return deleted

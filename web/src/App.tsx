@@ -25,18 +25,42 @@ function App() {
 
   const [isWidgetMode, setIsWidgetMode] = useState(true);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [forceInputOpen, setForceInputOpen] = useState(false);
 
   useEffect(() => {
     if (window.ipcRenderer) {
       const handleDragError = (_event: any, message: string) => {
         alert(message);
       };
+
+      const handleShortcutExpand = () => {
+        if (isMenuOpen && forceInputOpen) {
+          // It's currently open, so close it
+          setForceInputOpen(false);
+          setIsMenuOpen(false);
+          if (window.ipcRenderer) {
+            setTimeout(() => window.ipcRenderer.send('window-shrink'), 300);
+          }
+        } else {
+          // Open the small menu and force the input to show
+          setIsWidgetMode(true);
+          setIsMenuOpen(true);
+          setForceInputOpen(true);
+          if (window.ipcRenderer) {
+            window.ipcRenderer.send('window-expand-input');
+          }
+        }
+      };
+
       window.ipcRenderer.on('drag-out-error', handleDragError);
+      window.ipcRenderer.on('shortcut-expand-search', handleShortcutExpand);
+
       return () => {
         window.ipcRenderer.off('drag-out-error', handleDragError);
+        window.ipcRenderer.off('shortcut-expand-search', handleShortcutExpand);
       };
     }
-  }, []);
+  }, [isMenuOpen, forceInputOpen]);
 
   // Clear detail panel helper
   const handleCloseDetail = () => {
@@ -49,9 +73,7 @@ function App() {
     await getDetail(id);
   };
 
-  const handleSearch = (query: string) => {
-    search(query);
-  };
+
 
   const handleFileDrop = async (file: File) => {
     try {
@@ -76,11 +98,20 @@ function App() {
       const match = noteContent.match(/^["'](.*)["']$/);
       if (match) noteContent = match[1];
       if (noteContent) {
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const file = new File([noteContent], `nota_${timestamp}.txt`, { type: 'text/plain' });
+        const now = new Date();
+        const dd = String(now.getDate()).padStart(2, '0');
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        const yy = String(now.getFullYear()).slice(-2);
+        const hh = String(now.getHours()).padStart(2, '0');
+        const min = String(now.getMinutes()).padStart(2, '0');
+
+        const noteTitle = `Nota ${dd}/${mm}/${yy} ${hh}:${min}`;
+        const finalContent = `${noteTitle}\n\n${noteContent}`;
+
+        const file = new File([finalContent], `Nota_${dd}-${mm}-${yy}_${hh}-${min}.txt`, { type: 'text/plain' });
         try {
           await ingest(file);
-          handleExpand();
+          setIsMenuOpen(false);
         } catch (err) {
           console.error('Error creating note:', err);
           alert('Error creando nota: ' + (err as Error).message);
@@ -95,7 +126,7 @@ function App() {
       if (url) {
         try {
           await ingestUrl(url);
-          handleExpand();
+          setIsMenuOpen(false);
         } catch (err) {
           console.error('Error ingesting URL:', err);
           alert('Error procesando URL: ' + (err as Error).message);
@@ -110,7 +141,9 @@ function App() {
       if (id) {
         try {
           await removeDocument(id);
-          alert(`Documento ${id} eliminado correctamente.`);
+          setIsMenuOpen(false);
+          // Optional alert, but we can suppress it for seamless background action
+          // alert(`Documento ${id} eliminado correctamente.`);
         } catch (err) {
           console.error('Error deleting document:', err);
           alert('Error borrando documento: ' + (err as Error).message);
@@ -127,7 +160,9 @@ function App() {
         const tag = parts.slice(1).join(' ');
         try {
           await addTag(id, tag);
-          alert(`Etiqueta '${tag}' añadida al documento ${id}.`);
+          setIsMenuOpen(false);
+          // Optional confirmation alert, commenting out to be seamless
+          // alert(`Etiqueta '${tag}' añadida al documento ${id}.`);
         } catch (err) {
           console.error('Error adding tag:', err);
           alert('Error añadiendo etiqueta: ' + (err as Error).message);
@@ -245,25 +280,23 @@ function App() {
                 </div>
               </header>
 
-              {/* Split layout: Search Bar (Left) and Results (Right) */}
-              <div className="flex-1 flex overflow-hidden">
-                {/* Search Column */}
-                <div className="w-1/2 p-4 flex flex-col items-center justify-center border-r border-white/5 relative">
-                  <div className="w-full max-w-sm">
-                    <SearchBar
-                      onSearch={handleSearch}
-                      isSearching={searchState === 'processing'}
-                    />
-                    {searchState === 'error' && (
-                      <div className="text-red-400 font-mono text-xs mt-4 border border-red-500/20 bg-red-500/10 p-2 rounded text-center">
-                        Error accessing the void.
-                      </div>
-                    )}
-                  </div>
+              {/* Stacked layout: Search Bar (Top) and Results (Bottom) */}
+              <div className="flex-1 flex flex-col overflow-hidden">
+                {/* Search Header */}
+                <div className="w-full p-4 border-b border-white/5 bg-black/40 relative z-10 shrink-0">
+                  <SearchBar
+                    onSearch={handleTextSubmit}
+                    isSearching={searchState === 'processing'}
+                  />
+                  {searchState === 'error' && (
+                    <div className="text-red-400 font-mono text-xs mt-2 border border-red-500/20 bg-red-500/10 p-2 rounded text-center">
+                      Error accessing the void.
+                    </div>
+                  )}
                 </div>
 
-                {/* Results Column */}
-                <div className="w-1/2 overflow-y-auto p-4 custom-scrollbar relative">
+                {/* Results Area */}
+                <div className="flex-1 overflow-y-auto p-4 custom-scrollbar relative bg-transparent">
                   <SearchResults
                     results={searchResults}
                     onSelect={handleSelectDocument}
@@ -304,11 +337,16 @@ function App() {
           <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-40">
             <WidgetMenu
               isOpen={isMenuOpen}
-              onClose={() => setIsMenuOpen(false)}
+              onClose={() => {
+                setIsMenuOpen(false);
+                setForceInputOpen(false);
+              }}
               onExpand={handleExpand}
               onExit={handleExit}
               onTextSubmit={handleTextSubmit}
               onClipboardIngest={handleClipboardIngest}
+              forceInputOpen={forceInputOpen}
+              setForceInputOpen={setForceInputOpen}
             />
           </div>
         </div>
