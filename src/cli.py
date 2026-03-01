@@ -58,46 +58,70 @@ def ingest(
         console.print("[red]❌ No valid files to ingest.[/red]")
         raise typer.Exit(code=1)
 
+    import uuid
+    import shutil
+    import os
+    
+    VAULT_DIR = Path("blackvault_data/files").resolve()
+    VAULT_DIR.mkdir(parents=True, exist_ok=True)
+    
+    vault_paths: list[tuple[str, Path]] = []
+    for fp in resolved:
+        safe_filename = fp.name.replace(" ", "_").replace("/", "_").replace("\\", "_")
+        vault_path = VAULT_DIR / f"{uuid.uuid4().hex}_{safe_filename}"
+        shutil.copy2(fp, vault_path)
+        vault_paths.append((str(vault_path), fp))
+
     # Single file — direct (backward-compatible behaviour)
     if len(resolved) == 1:
-        filepath = resolved[0]
+        vault_path_str, original_fp = vault_paths[0]
         try:
-            logging.info(f"Ingesting file: {filepath}")
+            logging.info(f"Ingesting file: {original_fp}")
             
             import mimetypes
-            mime, _ = mimetypes.guess_type(str(filepath))
+            mime, _ = mimetypes.guess_type(vault_path_str)
             mime = mime or "application/octet-stream"
             
             if mime.startswith("image/"):
                 from backend.ocr import extract_text_from_image
-                parsed_text = extract_text_from_image(str(filepath))
+                parsed_text = extract_text_from_image(vault_path_str)
             else:
                 try:
-                    parsed_text = filepath.read_text(encoding="utf-8")
+                    parsed_text = Path(vault_path_str).read_text(encoding="utf-8")
                 except UnicodeDecodeError:
                     raise ValueError("File encoding error. Must be UTF-8.")
                     
-            item_id = ingest_file(str(filepath), parsed_text=parsed_text)
+            item_id = ingest_file(vault_path_str, parsed_text=parsed_text)
             logging.info(f"Successfully ingested item #{item_id}")
             console.print(
                 Panel(
                     f"[green]Item #{item_id}[/green] stored successfully.\n"
-                    f"Source: {filepath}",
+                    f"Source: {original_fp}\n"
+                    f"Vault Path: {vault_path_str}",
                     title="✅ Ingested",
                     border_style="green",
                 )
             )
         except DuplicateError as e:
+            if os.path.exists(vault_path_str):
+                os.remove(vault_path_str)
             console.print(
                 Panel(
                     f"[yellow]Item #{e.existing_id}[/yellow] already exists.\n"
                     f"Skipping ingestion to save resources.\n"
-                    f"Source: {filepath}",
+                    f"Source: {original_fp}",
                     title="⚠️  Duplicate Detected",
                     border_style="yellow",
                 )
             )
         except ValueError as e:
+            if os.path.exists(vault_path_str):
+                os.remove(vault_path_str)
+            console.print(f"[red]❌ {e}[/red]")
+            raise typer.Exit(code=1)
+        except Exception as e:
+            if os.path.exists(vault_path_str):
+                os.remove(vault_path_str)
             console.print(f"[red]❌ {e}[/red]")
             raise typer.Exit(code=1)
         return
@@ -105,7 +129,7 @@ def ingest(
     # Multiple files — parallel via IngestQueue
     console.print(f"[bold]📦 Queuing {len(resolved)} file(s) for parallel ingestion...[/bold]\n")
     queue = get_ingest_queue()
-    queue.submit_batch([str(fp) for fp in resolved])
+    queue.submit_batch([vp for vp, _ in vault_paths])
     results = queue.drain()
 
     # Summary table
@@ -116,17 +140,23 @@ def ingest(
     table.add_column("ID", width=6)
 
     ingested = duplicates = errors = 0
-    for i, r in enumerate(results, 1):
-        name = Path(r.path).name
+    # Map back the vault paths to original paths for display
+    # Results come out in same order as submitted queue
+    for i, (r, (_, orig_fp)) in enumerate(zip(results, vault_paths), 1):
+        name = orig_fp.name
         if r.is_duplicate:
             duplicates += 1
             table.add_row(str(i), name, "[yellow]⚠️  Duplicate[/yellow]", str(r.duplicate_id))
+            if os.path.exists(r.path):
+                os.remove(r.path)
         elif r.success:
             ingested += 1
             table.add_row(str(i), name, "[green]✅ OK[/green]", str(r.item_id))
         else:
             errors += 1
             table.add_row(str(i), name, f"[red]❌ {r.error}[/red]", "—")
+            if os.path.exists(r.path):
+                os.remove(r.path)
 
     console.print(table)
     console.print(

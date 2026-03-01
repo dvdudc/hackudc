@@ -132,25 +132,29 @@ def api_ingest_batch(files: List[UploadFile] = File(...)):
     if not files:
         raise HTTPException(status_code=400, detail="No files provided.")
 
-    # Save all uploaded files to temp paths
-    temp_paths: list[tuple[str, str]] = []  # (temp_path, original_filename)
+    # Save all uploaded files to Vault paths
+    vault_paths: list[tuple[str, str]] = []  # (vault_path, original_filename)
+    import uuid
     for uploaded in files:
-        fd, temp_path = tempfile.mkstemp(suffix=f"_{uploaded.filename}")
-        with os.fdopen(fd, 'wb') as f:
+        safe_filename = (uploaded.filename or "unknown").replace(" ", "_").replace("/", "_").replace("\\", "_")
+        unique_filename = f"{uuid.uuid4().hex}_{safe_filename}"
+        vault_path = VAULT_DIR / unique_filename
+        
+        with open(vault_path, 'wb') as f:
             shutil.copyfileobj(uploaded.file, f)
-        temp_paths.append((temp_path, uploaded.filename or "unknown"))
+        vault_paths.append((str(vault_path), uploaded.filename or "unknown"))
 
     try:
         # Submit all to the queue and drain
         queue = get_ingest_queue()
-        queue.submit_batch([tp for tp, _ in temp_paths])
+        queue.submit_batch([vp for vp, _ in vault_paths])
         results = queue.drain()
 
-        # Build response
+        # Build response & cleanup failed/duplicate vault files
         item_responses: list[BatchIngestItemResponse] = []
         ingested = duplicates = errors = 0
 
-        for (_, orig_name), r in zip(temp_paths, results):
+        for r, (_, orig_name) in zip(results, vault_paths):
             if r.is_duplicate:
                 duplicates += 1
                 item_responses.append(BatchIngestItemResponse(
@@ -158,6 +162,8 @@ def api_ingest_batch(files: List[UploadFile] = File(...)):
                     message="Document already exists.",
                     documentId=str(r.duplicate_id),
                 ))
+                if os.path.exists(r.path):
+                    os.remove(r.path)
             elif r.success:
                 ingested += 1
                 item_responses.append(BatchIngestItemResponse(
@@ -171,16 +177,20 @@ def api_ingest_batch(files: List[UploadFile] = File(...)):
                     filename=orig_name, success=False,
                     message=r.error or "Unknown error.",
                 ))
+                if os.path.exists(r.path):
+                    os.remove(r.path)
 
         return BatchIngestResponse(
             total=len(files),
             ingested=ingested, duplicates=duplicates, errors=errors,
             results=item_responses,
         )
-    finally:
-        for tp, _ in temp_paths:
-            if os.path.exists(tp):
-                os.remove(tp)
+    except Exception as e:
+        # For catastrophic failures, clean up everything
+        for vp, _ in vault_paths:
+            if os.path.exists(vp):
+                os.remove(vp)
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/document/{doc_id}", response_model=DocumentDetail)
 def api_get_document(doc_id: str):
