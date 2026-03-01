@@ -42,7 +42,6 @@ Black Vault es una aplicación local donde puedes soltar cualquier archivo de te
 | Embeddings | Google `gemini-embedding-001` (3072 dim) |
 | Enriquecimiento | Ollama `llama3.2` (título, tags, resumen) |
 | Chunking | `langchain-text-splitters` (RecursiveCharacterTextSplitter) |
-| Detección de tipo | `python-magic` (libmagic) |
 | CLI | `typer` + `rich` |
 | Búsqueda | Híbrida: semántica (coseno HNSW) + léxica (ILIKE), peso 70/30 |
 | Logging | RichHandler + File Logging (toggled via CLI) |
@@ -52,13 +51,6 @@ Black Vault es una aplicación local donde puedes soltar cualquier archivo de te
 ### 1. Requisitos previos
 
 - Python 3.10+
-- `libmagic` instalado en el sistema:
-  ```bash
-  # Ubuntu/Debian
-  sudo apt install libmagic1
-  # macOS
-  brew install libmagic
-  ```
 
 ### 2. Instalación
 
@@ -104,9 +96,6 @@ python cli.py export --format csv
 Archivo .txt/.md
        │
        ▼
-  python-magic        ← Verifica MIME type (text/*)
-       │
-       ▼
   Leer contenido      ← UTF-8
        │
        ▼
@@ -147,11 +136,3 @@ Los resultados se fusionan y ordenan por score combinado.
 ├── tests/                # Pruebas y benchmarks de búsqueda
 └── README.md             # Esta guía
 ```
-
-## MVP — Limitaciones actuales
-
-- Solo procesa archivos de texto plano (`text/*`)
-- La interfaz es CLI (sin GUI)
-- Enriquecimiento y conexiones se ejecutan de forma síncrona
-- Sin watcher de portapapeles ni hotkeys
-- Sin soporte para PDF, imágenes, audio, URLs (previsto para futuras iteraciones)
