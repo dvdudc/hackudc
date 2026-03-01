@@ -6,11 +6,11 @@ into structured Pydantic models.
 
 import json
 import logging
-import urllib.request
 from typing import Literal
 from pydantic import BaseModel, Field
 
-from backend.config import OLLAMA_HOST, LLM_MODEL
+from backend.config import GROQ_API_KEY, LLM_MODEL
+from langchain_groq import ChatGroq
 
 class Filters(BaseModel):
     created_after: str | None = Field(default=None, description="Date in YYYY-MM-DD format if the user asks for files created after a certain date")
@@ -62,18 +62,10 @@ User Query: "{query}"
 
 Return ONLY valid JSON. No markdown formatting.
 """
-    url = f"http://{OLLAMA_HOST}/api/generate"
-    payload = {"model": LLM_MODEL, "prompt": prompt, "stream": False, "format": "json"}
-    
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-    
     try:
-        with urllib.request.urlopen(req, timeout=15) as response:
-            resp_body = response.read().decode("utf-8")
-            resp_json = json.loads(resp_body)
-            raw_text = resp_json.get("response", "").strip()
-            return QueryIntent.model_validate_json(raw_text)
+        model = ChatGroq(model=LLM_MODEL, api_key=GROQ_API_KEY, temperature=0.1)
+        structured_llm = model.with_structured_output(QueryIntent)
+        return structured_llm.invoke(prompt)
     except Exception as e:
         logging.warning(f"Intent parsing failed: {e}. Falling back to default.")
         return QueryIntent(
