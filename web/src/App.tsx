@@ -17,7 +17,6 @@ function App() {
     searchResults,
     searchState,
     ingestState,
-    consolidateState,
     currentDetail,
     detailState,
     removeDocument,
