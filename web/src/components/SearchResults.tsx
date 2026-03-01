@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { DocumentResult } from '@/services/api';
-import { Sparkles, Tag } from 'lucide-react';
+import { Sparkles, Tag, ExternalLink } from 'lucide-react';
 
 interface SearchResultsProps {
     results: DocumentResult[];
@@ -31,20 +31,43 @@ export const SearchResults: React.FC<SearchResultsProps> = ({ results, onSelect 
                             delay: index * 0.05
                         }}
                         onClick={() => onSelect(result.id)}
+                        draggable={true}
+                        onDragStart={(e) => {
+                            e.preventDefault();
+                            if (window.ipcRenderer && result.source_path) {
+                                window.ipcRenderer.send('drag-out', result.source_path);
+                            }
+                        }}
                         className="group cursor-pointer p-6 rounded-2xl bg-black border border-white/10 hover:border-white/30 transition-all duration-500 hover:shadow-[0_0_40px_rgba(255,255,255,0.05)] relative overflow-hidden"
                     >
                         {/* Hover flare effect */}
                         <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
 
                         <div className="flex justify-between items-start mb-3">
-                            <h3 className="text-xl font-medium text-white group-hover:text-white/90 transition-colors">
+                            <h3 className="text-xl font-medium text-white group-hover:text-white/90 transition-colors pr-2">
                                 {result.title}
                             </h3>
-                            {result.score && (
-                                <span className="text-xs font-mono px-2 py-1 rounded bg-white/5 text-white/60 border border-white/10">
-                                    {(result.score * 100).toFixed(0)}% Match
-                                </span>
-                            )}
+                            <div className="flex items-center gap-2 shrink-0">
+                                {result.source_path && (
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (window.ipcRenderer) {
+                                                window.ipcRenderer.send('open-file', result.source_path);
+                                            }
+                                        }}
+                                        className="p-1.5 rounded-full bg-white/5 hover:bg-white/20 text-white/60 hover:text-white border border-white/10 transition-colors"
+                                        title="Abrir archivo directamente (Alternativa a arrastrar)"
+                                    >
+                                        <ExternalLink size={14} />
+                                    </button>
+                                )}
+                                {result.score && (
+                                    <span className="text-xs font-mono px-2 py-1 rounded bg-white/5 text-white/60 border border-white/10">
+                                        {(result.score * 100).toFixed(0)}% Match
+                                    </span>
+                                )}
+                            </div>
                         </div>
 
                         <p className="text-white/60 text-sm mb-4 line-clamp-2 leading-relaxed">

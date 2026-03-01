@@ -8,6 +8,7 @@ interface WidgetMenuProps {
     onExpand: () => void;
     onExit: () => void;
     onTextSubmit: (text: string) => void;
+    onClipboardIngest: () => void;
 }
 
 export const WidgetMenu: React.FC<WidgetMenuProps> = ({
@@ -15,7 +16,8 @@ export const WidgetMenu: React.FC<WidgetMenuProps> = ({
     onClose,
     onExpand,
     onExit,
-    onTextSubmit
+    onTextSubmit,
+    onClipboardIngest
 }) => {
     const [showInput, setShowInput] = useState(false);
     const [inputText, setInputText] = useState('');
@@ -58,7 +60,7 @@ export const WidgetMenu: React.FC<WidgetMenuProps> = ({
                                     whileHover={{ scale: 1.1 }}
                                     whileTap={{ scale: 0.9 }}
                                     onClick={onExpand}
-                                    className="absolute top-2 left-1/2 -translate-x-1/2 bg-white/10 hover:bg-white/20 p-2 rounded-full border border-white/20 backdrop-blur-md shadow-[0_0_15px_rgba(255,255,255,0.1)] text-white"
+                                    className="absolute top-2 right-2 bg-white/10 hover:bg-white/20 p-2 rounded-full border border-white/20 backdrop-blur-md shadow-[0_0_15px_rgba(255,255,255,0.1)] text-white pointer-events-auto"
                                     title="Expand to Full Screen"
                                 >
                                     <Maximize2 size={16} />
@@ -71,7 +73,7 @@ export const WidgetMenu: React.FC<WidgetMenuProps> = ({
                                         setShowInput(true);
                                         if (window.ipcRenderer) window.ipcRenderer.send('window-expand-input');
                                     }}
-                                    className="absolute bottom-2 left-2 bg-white/10 hover:bg-white/20 p-2 rounded-full border border-white/20 backdrop-blur-md shadow-[0_0_15px_rgba(255,255,255,0.1)] text-white"
+                                    className="absolute bottom-2 left-2 bg-white/10 hover:bg-white/20 p-2 rounded-full border border-white/20 backdrop-blur-md shadow-[0_0_15px_rgba(255,255,255,0.1)] text-white pointer-events-auto"
                                     title="Ask the Void"
                                 >
                                     <Upload size={16} />
@@ -80,8 +82,21 @@ export const WidgetMenu: React.FC<WidgetMenuProps> = ({
                                 <motion.button
                                     whileHover={{ scale: 1.1 }}
                                     whileTap={{ scale: 0.9 }}
+                                    onClick={() => {
+                                        onClipboardIngest();
+                                        onClose();
+                                    }}
+                                    className="absolute top-2 left-2 bg-blue-500/20 hover:bg-blue-500/40 p-2 rounded-full border border-blue-500/50 backdrop-blur-md shadow-[0_0_15px_rgba(59,130,246,0.2)] text-white pointer-events-auto"
+                                    title="Paste from Clipboard"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="8" height="4" x="8" y="2" rx="1" ry="1" /><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /></svg>
+                                </motion.button>
+
+                                <motion.button
+                                    whileHover={{ scale: 1.1 }}
+                                    whileTap={{ scale: 0.9 }}
                                     onClick={onExit}
-                                    className="absolute bottom-2 right-2 bg-red-500/20 hover:bg-red-500/40 p-2 rounded-full border border-red-500/50 backdrop-blur-md shadow-[0_0_15px_rgba(239,68,68,0.2)] text-white"
+                                    className="absolute bottom-2 right-2 bg-red-500/20 hover:bg-red-500/40 p-2 rounded-full border border-red-500/50 backdrop-blur-md shadow-[0_0_15px_rgba(239,68,68,0.2)] text-white pointer-events-auto"
                                     title="Close App"
                                 >
                                     <X size={16} />

@@ -27,7 +27,9 @@ Total de palabras en el documento completo: {doc_word_count}
 
 ## INSTRUCCIONES
 
-Analiza el fragmento y devuelve un JSON con la siguiente estructura. 
+Analiza el fragmento anterior y extrae la información real basándote en su contenido.
+Devuelve un JSON rellenado con los datos extraídos, manteniendo estrictamente esta estructura. 
+REEMPLAZA los valores de ejemplo de este template por los valores reales extraídos del texto.
 SIN texto adicional, SIN explicaciones. Solo el JSON. Puedes usar valid JSON codeblocks (```json).
 
 ### REGLAS CRÍTICAS:
@@ -35,23 +37,26 @@ SIN texto adicional, SIN explicaciones. Solo el JSON. Puedes usar valid JSON cod
 - La `densidad_tematica` mide qué tan concentrado está el tema en este chunk (0.0 a 1.0).
 - El `score_relevancia_chunk` refleja qué tan autosuficiente y útil es este chunk de forma aislada.
 - Los `terminos_clave_ponderados` deben reflejar importancia RELATIVA al chunk.
+- RELLENA los campos de texto con contenido real analizado, NUNCA devuelvas cadenas vacías si hay información útil.
+
+TEMPLATE JSON A LLENAR:
 ```json
 {{
-  "titulo": "string — título descriptivo y específico del chunk (no del documento completo)",
-  "resumen": "string — 1-2 oraciones que capturen la idea central de ESTE fragmento",
-  "tipo_contenido": "enum: [tecnico, narrativo, instruccional, referencia, conceptual, codigo, datos, mixto]",
-  "idioma": "string — código ISO 639-1 (es, en, fr...)",
+  "titulo": "Escribe aquí el título descriptivo y específico del chunk",
+  "resumen": "Escribe aquí 1-2 oraciones que capturen la idea central de este fragmento",
+  "tipo_contenido": "Elige estrictamente uno de: [tecnico, narrativo, instruccional, referencia, conceptual, codigo, datos, mixto]",
+  "idioma": "Escribe aquí código ISO 639-1 (ej: es, en, fr)",
   "tags": [
-    "string — máximo 7 tags, términos únicos y discriminativos de ESTE chunk"
+    "tag1", "tag2", "tag3"
   ],
   "terminos_clave_ponderados": {{
-    "termino_1": 0.95,
-    "termino_2": 0.80
+    "termino_real_1": 0.95,
+    "termino_real_2": 0.80
   }},
-  "densidad_tematica": 0.0,
-  "score_relevancia_chunk": 0.0,
+  "densidad_tematica": 0.8,
+  "score_relevancia_chunk": 0.7,
   "entidades": {{
-    "personas": [],
+    "personas": ["persona1"],
     "organizaciones": [],
     "lugares": [],
     "fechas": [],
@@ -59,10 +64,10 @@ SIN texto adicional, SIN explicaciones. Solo el JSON. Puedes usar valid JSON cod
     "productos_herramientas": []
   }},
   "preguntas_que_responde": [
-    "string — 2-4 preguntas"
+    "Escribe pregunta 1", "Escribe pregunta 2"
   ],
-  "contexto_necesario": "enum: [autosuficiente, requiere_chunks_anteriores, requiere_chunks_posteriores, requiere_ambos]",
-  "chunk_posicion": "enum: [introduccion, desarrollo, conclusion, fragmento_aislado]"
+  "contexto_necesario": "Elige estrictamente uno de: [autosuficiente, requiere_chunks_anteriores, requiere_chunks_posteriores, requiere_ambos]",
+  "chunk_posicion": "Elige estrictamente uno de: [introduccion, desarrollo, conclusion, fragmento_aislado]"
 }}
 ```
 """
@@ -110,7 +115,7 @@ def enrich_item(item_id: int) -> dict:
         )
 
         try:
-            with urllib.request.urlopen(req, timeout=10) as response:
+            with urllib.request.urlopen(req, timeout=300) as response:
                 resp_body = response.read().decode("utf-8")
                 resp_json = json.loads(resp_body)
                 raw = resp_json.get("response", "").strip()
@@ -133,9 +138,16 @@ def enrich_item(item_id: int) -> dict:
                 all_tags.extend(data["tags"])
             if data.get("titulo"):
                 chunk_titles.append(data["titulo"])
+            else:
+                print(f"⚠️  No 'titulo' found in extracted JSON data. Dump: {data}")
+                print(f"RAW OLLAMA RESP: {raw}")
                 
             print(f" ✨ Chunk {i+1}/{total_chunks} enriched: {data.get('titulo')}")
 
+        except json.JSONDecodeError as je:
+            print(f"⚠️ JSON Parse Error: {je}")
+            print(f"RAW OLLAMA RESULT WAS: {raw}")
+            break
         except urllib.error.URLError as e:
             print(f"⚠️  Failed to connect to Ollama at {url}: {e}")
             break
@@ -153,6 +165,14 @@ def enrich_item(item_id: int) -> dict:
     
     final_summary = f"Doc aggregated from {total_chunks} chunk(s)."
     
-    db.update_item_enrichment(item_id, final_title, tags_str, final_summary)
+    metadata_text = f"Tags: {tags_str}\nSummary: {final_summary}"
+    try:
+        from backend.ingest import get_embedding
+        metadata_vector = get_embedding(metadata_text)
+    except Exception as e:
+        print(f"⚠️  Failed to generate metadata vector for item #{item_id}: {e}")
+        metadata_vector = None
+
+    db.update_item_enrichment(item_id, final_title, tags_str, final_summary, metadata_vector)
     print(f"🏷️  Enriched item #{item_id}: \"{final_title}\"")
-    return {"title": final_title, "tags": tags_str, "summary": final_summary}
+    return {"title": final_title, "tags": tags_str, "summary": final_summary, "metadata_vector": metadata_vector}

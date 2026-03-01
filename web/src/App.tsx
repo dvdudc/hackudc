@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { BlackHole } from '@/components/BlackHole';
 import { SearchBar } from '@/components/SearchBar';
 import { SearchResults } from '@/components/SearchResults';
@@ -22,6 +22,18 @@ function App() {
 
   const [isWidgetMode, setIsWidgetMode] = useState(true);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (window.ipcRenderer) {
+      const handleDragError = (_event: any, message: string) => {
+        alert(message);
+      };
+      window.ipcRenderer.on('drag-out-error', handleDragError);
+      return () => {
+        window.ipcRenderer.off('drag-out-error', handleDragError);
+      };
+    }
+  }, []);
 
   // Clear detail panel helper
   const handleCloseDetail = () => {
@@ -56,6 +68,21 @@ function App() {
     // Treat the text as a seach query per user request "para preguntarle al agujero negro"
     search(text);
     handleExpand();
+  };
+
+  const handleClipboardIngest = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text && text.trim()) {
+        const file = new File([text], `clipboard_${new Date().getTime()}.txt`, { type: 'text/plain' });
+        await ingest(file);
+      }
+    } catch (err) {
+      console.error('Failed to read clipboard or ingest:', err);
+      if (err instanceof Error) {
+        alert("Upload error: " + err.message);
+      }
+    }
   };
 
   const handleExpand = () => {
@@ -197,6 +224,7 @@ function App() {
               onExpand={handleExpand}
               onExit={handleExit}
               onTextSubmit={handleTextSubmit}
+              onClipboardIngest={handleClipboardIngest}
             />
           </div>
         </div>

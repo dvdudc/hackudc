@@ -1,125 +1,117 @@
 """
-Black Vault — Search module.
-Hybrid search: Semantic (Vector) + Lexical (FTS/BM25).
+Black Vault — Hybrid Search Engine
+Combines semantic search (vector embeddings via DuckDB HNSW)
+with lexical search (BM25 via DuckDB FTS), merging the results.
+Now uses Query Intent Routing instead of raw LLM SQL generation.
 """
+
 from __future__ import annotations
-import time
-import re
+
 import logging
 
-import json
-import urllib.request
-import urllib.error
-
-from backend.config import EMBEDDING_DIM, OLLAMA_HOST, LLM_MODEL
+from backend.llm import get_client
+from backend.config import EMBEDDING_DIM, EMBEDDING_MODEL
 from backend import db
-from backend.ingest import get_embedding
+from backend.intent import parse_intent
 
 
-# ── Allowed columns and values for SQL filter validation ─────────────
-_ALLOWED_FILTER_COLS = {"i.source_type", "i.title", "i.tags", "i.summary"}
-_DANGEROUS_KEYWORDS = re.compile(
-    r"\b(DROP|DELETE|INSERT|UPDATE|ALTER|CREATE|TRUNCATE|EXEC|UNION|--|;)\b",
-    re.IGNORECASE,
-)
-
-
-def _validate_sql_filter(sql_filter: str) -> str:
-    """Sanitise the LLM-generated SQL filter. Return '1=1' if anything looks wrong."""
-    if not sql_filter or not sql_filter.strip():
-        return "1=1"
-
-    # Basic injection / destructive keyword check
-    if _DANGEROUS_KEYWORDS.search(sql_filter):
-        logging.warning(f"Rejected dangerous SQL filter from LLM: {sql_filter}")
-        return "1=1"
-
-    # Only allow filters that reference permitted columns
-    # Extract identifiers that look like "i.<col>"
-    col_refs = re.findall(r"\bi\.\w+", sql_filter)
-    for col in col_refs:
-        if col not in _ALLOWED_FILTER_COLS:
-            logging.warning(f"Rejected SQL filter referencing unknown column '{col}': {sql_filter}")
-            return "1=1"
-
-    # Validate the filter actually executes against the real DB
-    try:
-        con = db.get_connection()
-        con.execute(
-            f"SELECT 1 FROM items i WHERE {sql_filter} LIMIT 0"
-        )
-    except Exception as e:
-        logging.warning(f"SQL filter from LLM is invalid ({e}): {sql_filter}")
-        return "1=1"
-
-    return sql_filter
-
-
-def enrich_query(query: str) -> dict:
-    """
-    Asks the local Ollama LLM to analyze the user query and extract filtering rules
-    and semantic synonyms to improve the search precision.
-    """
-    prompt = f"""
-Analyze the following search query and extract any explicit filters regarding file type, tags, or dates.
-Then, expand the core search intent with synonyms.
-Return a JSON with exactly these keys:
-- "expanded_query": A string with the core search terms and synonyms for vector/lexical search.
-- "sql_filter": A valid SQL WHERE clause fragment applying ONLY to columns in the `i` (items) table.
-  Allowed columns: i.source_type (values: 'text' or 'image'), i.title, i.tags, i.summary.
-  Use ILIKE for text matching. If no filters apply, return "1=1". Do NOT include the word WHERE.
-
-User Query: "{query}"
-
-Return ONLY valid JSON, no extra text.
-"""
-    url = f"http://{OLLAMA_HOST}/api/generate"
-    payload = {"model": LLM_MODEL, "prompt": prompt, "stream": False, "format": "json"}
-
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-
-    try:
-        with urllib.request.urlopen(req, timeout=15) as response:
-            resp_body = response.read().decode("utf-8")
-            resp_json = json.loads(resp_body)
-            raw_text = resp_json.get("response", "").strip()
-
-            try:
-                data = json.loads(raw_text)
-                expanded = data.get("expanded_query", query)
-                # Ollama sometimes returns a list of terms instead of a string
-                if isinstance(expanded, list):
-                    expanded = " ".join(str(x) for x in expanded)
-                expanded = expanded.strip() if isinstance(expanded, str) else query
-                if not expanded:
-                    expanded = query
-                raw_filter = data.get("sql_filter", "1=1") or "1=1"
-                safe_filter = _validate_sql_filter(raw_filter)
-                return {
-                    "expanded_query": expanded,
-                    "sql_filter": safe_filter,
-                }
-            except json.JSONDecodeError:
-                return {"expanded_query": query, "sql_filter": "1=1"}
-    except Exception as e:
-        logging.warning(f"Query enrichment failed: {e}")
-        return {"expanded_query": query, "sql_filter": "1=1"}
+def get_embedding(text: str) -> list[float]:
+    result = get_client().models.embed_content(
+        model=EMBEDDING_MODEL,
+        contents=text,
+    )
+    return list(result.embeddings[0].values)
 
 
 def search(query: str, limit: int = 10, use_enrichment: bool = True) -> list[dict]:
     con = db.get_connection()
 
-    expanded_query = query
+    semantic_query = query
+    lexical_query = query
     sql_filter = "1=1"
+    params = []
+    
+    # Session context vector
+    session_vec = db.get_recent_session_vector(limit=5)
+    session_vector_str = "[" + ", ".join(map(str, session_vec)) + "]" if session_vec else None
 
     if use_enrichment:
-        enrichment = enrich_query(query)
-        expanded_query = enrichment["expanded_query"]
-        sql_filter = enrichment["sql_filter"]
+        try:
+            intent_data = parse_intent(query)
+            # Safeguard: if LLM strips the query too aggressively, keep the original
+            parsed_sem = intent_data.semantic_query.strip()
+            if len(parsed_sem) >= 2:
+                semantic_query = parsed_sem
+            # else: keep semantic_query = query (the original)
+            
+            # BM25 gets original query + semantic terms + synonyms for max recall
+            syns = " ".join(intent_data.lexical_synonyms) if intent_data.lexical_synonyms else ""
+            lexical_query = f"{query} {syns}".strip()
+
+            # Build SQL safely
+            clauses = []
+            if intent_data.filters.file_type:
+                clauses.append("i.source_type = ?")
+                params.append(intent_data.filters.file_type)
+            if intent_data.filters.created_after:
+                clauses.append("i.created_at >= ?")
+                params.append(f"{intent_data.filters.created_after} 00:00:00")
+            if intent_data.filters.tags:
+                for tag in intent_data.filters.tags:
+                    clauses.append("i.tags ILIKE ?")
+                    params.append(f"%{tag}%")
+            
+            if clauses:
+                sql_filter = " AND ".join(clauses)
+
+            # ── TEMPORAL BYPASS ──────────────────────────────────────
+            # Only bypass hybrid when intent is EXPLICITLY metadata_filter
+            # AND we have actionable SQL clauses (date, type, or tags).
+            has_date_filter = intent_data.filters.created_after is not None
+            is_pure_metadata = (
+                intent_data.intent == "metadata_filter"
+                and clauses
+                and (not parsed_sem or len(parsed_sem) < 3)
+            )
+            should_bypass = intent_data.intent == "metadata_filter" and has_date_filter
+            if should_bypass or is_pure_metadata:
+                logging.info(f"Temporal bypass: pure metadata query, skipping hybrid search.")
+                rows = con.execute(
+                    f"""
+                    SELECT i.id AS item_id, i.title, i.tags, i.summary,
+                           i.source_type, i.created_at
+                    FROM items i
+                    WHERE {sql_filter}
+                    ORDER BY i.created_at DESC
+                    LIMIT ?;
+                    """,
+                    params + [limit],
+                ).fetchall()
+                results = []
+                from datetime import datetime
+                now = datetime.now()
+                for row in rows:
+                    created = row[5]
+                    # Compute recency score: 1.0 for now, decaying over 7 days
+                    if created is not None:
+                        delta = (now - created).total_seconds()
+                        recency = max(0.0, 1.0 - delta / (7 * 24 * 3600))
+                    else:
+                        recency = 0.0
+                    results.append({
+                        "item_id": row[0],
+                        "title": row[1] or "(sin título)",
+                        "score": round(recency, 3),
+                        "snippet": f"📁 {row[4]} | 🏷️ {row[2] or '—'} | 📝 {row[3] or '—'}",
+                    })
+                results.sort(key=lambda x: x["score"], reverse=True)
+                return results
+
+        except Exception as e:
+            logging.warning(f"Intent parsing error: {e}")
 
     # ── 1. Generate query embedding ──────────────────────────────────
-    query_vec = get_embedding(expanded_query)
+    query_vec = get_embedding(semantic_query)
 
     # ── 2. Semantic Search (Vector / HNSW) ───────────────────────────
     vector_str = "[" + ", ".join(map(str, query_vec)) + "]"
@@ -129,13 +121,23 @@ def search(query: str, limit: int = 10, use_enrichment: bool = True) -> list[dic
             semantic_rows = con.execute(
                 f"""
                 WITH top_embeddings AS (
-                    SELECT item_id, content_id,
-                           array_cosine_distance(vector, {vector_str}::FLOAT[{EMBEDDING_DIM}]) AS dist
-                    FROM embeddings
-                    ORDER BY array_cosine_distance(vector, {vector_str}::FLOAT[{EMBEDDING_DIM}])
+                    SELECT e.item_id, e.content_id, ie.metadata_vector,
+                           array_cosine_distance(e.vector, {vector_str}::FLOAT[{EMBEDDING_DIM}]) AS dist
+                    FROM embeddings e
+                    JOIN items i ON i.id = e.item_id
+                    LEFT JOIN item_embeddings ie ON ie.item_id = e.item_id
+                    ORDER BY array_cosine_distance(e.vector, {vector_str}::FLOAT[{EMBEDDING_DIM}])
                     LIMIT {limit * 2}
                 )
-                SELECT t.item_id, c.body AS snippet, (1.0 - t.dist) AS sem_score
+                SELECT t.item_id, c.body AS snippet, 
+                       (1.0 - t.dist) AS chunk_score,
+                       CASE WHEN t.metadata_vector IS NOT NULL 
+                            THEN (1.0 - array_cosine_distance(t.metadata_vector, {vector_str}::FLOAT[{EMBEDDING_DIM}])) 
+                            ELSE 0.0 END AS meta_score,
+                       {
+                           f"CASE WHEN t.metadata_vector IS NOT NULL THEN (1.0 - array_cosine_distance(t.metadata_vector, {session_vector_str}::FLOAT[{EMBEDDING_DIM}])) ELSE 0.0 END"
+                           if session_vector_str else "0.0"
+                       } AS session_score
                 FROM top_embeddings t
                 JOIN content c ON c.id = t.content_id
                 """
@@ -144,42 +146,61 @@ def search(query: str, limit: int = 10, use_enrichment: bool = True) -> list[dic
             semantic_rows = con.execute(
                 f"""
                 WITH filtered_embeddings AS (
-                    SELECT e.item_id, e.content_id, e.vector
+                    SELECT e.item_id, e.content_id, e.vector, ie.metadata_vector
                     FROM embeddings e
                     JOIN items i ON i.id = e.item_id
+                    LEFT JOIN item_embeddings ie ON ie.item_id = e.item_id
                     WHERE {sql_filter}
                 ),
                 top_embeddings AS (
-                    SELECT item_id, content_id,
+                    SELECT item_id, content_id, metadata_vector,
                            array_cosine_distance(vector, {vector_str}::FLOAT[{EMBEDDING_DIM}]) AS dist
                     FROM filtered_embeddings
                     ORDER BY array_cosine_distance(vector, {vector_str}::FLOAT[{EMBEDDING_DIM}])
                     LIMIT {limit * 2}
                 )
-                SELECT t.item_id, c.body AS snippet, (1.0 - t.dist) AS sem_score
+                SELECT t.item_id, c.body AS snippet, 
+                       (1.0 - t.dist) AS chunk_score,
+                       CASE WHEN t.metadata_vector IS NOT NULL 
+                            THEN (1.0 - array_cosine_distance(t.metadata_vector, {vector_str}::FLOAT[{EMBEDDING_DIM}])) 
+                            ELSE 0.0 END AS meta_score,
+                       {
+                           f"CASE WHEN t.metadata_vector IS NOT NULL THEN (1.0 - array_cosine_distance(t.metadata_vector, {session_vector_str}::FLOAT[{EMBEDDING_DIM}])) ELSE 0.0 END"
+                           if session_vector_str else "0.0"
+                       } AS session_score
                 FROM top_embeddings t
                 JOIN content c ON c.id = t.content_id
-                """
+                """, params
             ).fetchall()
     except Exception as e:
         logging.warning(f"Semantic search failed with filter '{sql_filter}': {e}. Falling back.")
         semantic_rows = con.execute(
             f"""
             WITH top_embeddings AS (
-                SELECT item_id, content_id,
-                       array_cosine_distance(vector, {vector_str}::FLOAT[{EMBEDDING_DIM}]) AS dist
-                FROM embeddings
-                ORDER BY array_cosine_distance(vector, {vector_str}::FLOAT[{EMBEDDING_DIM}])
+                SELECT e.item_id, e.content_id, ie.metadata_vector,
+                       array_cosine_distance(e.vector, {vector_str}::FLOAT[{EMBEDDING_DIM}]) AS dist
+                FROM embeddings e
+                JOIN items i ON i.id = e.item_id
+                LEFT JOIN item_embeddings ie ON ie.item_id = e.item_id
+                ORDER BY array_cosine_distance(e.vector, {vector_str}::FLOAT[{EMBEDDING_DIM}])
                 LIMIT {limit * 2}
             )
-            SELECT t.item_id, c.body AS snippet, (1.0 - t.dist) AS sem_score
+            SELECT t.item_id, c.body AS snippet, 
+                   (1.0 - t.dist) AS chunk_score,
+                   CASE WHEN t.metadata_vector IS NOT NULL 
+                        THEN (1.0 - array_cosine_distance(t.metadata_vector, {vector_str}::FLOAT[{EMBEDDING_DIM}])) 
+                        ELSE 0.0 END AS meta_score,
+                   {
+                       f"CASE WHEN t.metadata_vector IS NOT NULL THEN (1.0 - array_cosine_distance(t.metadata_vector, {session_vector_str}::FLOAT[{EMBEDDING_DIM}])) ELSE 0.0 END"
+                       if session_vector_str else "0.0"
+                   } AS session_score
             FROM top_embeddings t
             JOIN content c ON c.id = t.content_id
             """
         ).fetchall()
 
     # ── 3. Lexical Search (FTS / BM25) ───────────────────────────────
-    safe_query = expanded_query.replace("'", "''")
+    safe_query = lexical_query.replace("'", "''")
     try:
         if sql_filter.strip() == "1=1":
             lex_rows = con.execute(
@@ -205,7 +226,7 @@ def search(query: str, limit: int = 10, use_enrichment: bool = True) -> list[dic
                 ORDER BY lex_score DESC
                 LIMIT ?;
                 """,
-                [limit * 2],
+                params + [limit * 2],
             ).fetchall()
     except Exception as e:
         logging.warning(f"FTS Search failed: {e}")
@@ -213,12 +234,19 @@ def search(query: str, limit: int = 10, use_enrichment: bool = True) -> list[dic
 
     # ── 4. Deduplicate per item_id ───────────────────────────────────
     semantic: dict[int, dict] = {}
-    for item_id, snippet, score in semantic_rows:
-        if item_id not in semantic or score > semantic[item_id]["sem_score"]:
-            semantic[item_id] = {"snippet": snippet, "sem_score": score}
+    for item_id, snippet, chunk_score, meta_score, session_score in semantic_rows:
+        base_sem = (chunk_score * 0.7 + meta_score * 0.3) if meta_score > 0.0 else chunk_score
+        
+        # Boost up to 20% if there is strong alignment with recently viewed items
+        if session_score > 0.4:
+            base_sem += (session_score - 0.4) * 0.4
+            
+        if item_id not in semantic or base_sem > semantic[item_id]["sem_score"]:
+            semantic[item_id] = {"snippet": snippet, "sem_score": base_sem}
 
     lexical: dict[int, dict] = {}
     for item_id, snippet, lex_score in lex_rows:
+        lex_score = lex_score or 0.0
         if item_id not in lexical or lex_score > lexical[item_id]["lex_score"]:
             lexical[item_id] = {"snippet": snippet, "lex_score": lex_score}
 
@@ -233,41 +261,51 @@ def search(query: str, limit: int = 10, use_enrichment: bool = True) -> list[dic
         max_lex = max(lex_values)
         lex_range = max_lex - min_lex if max_lex != min_lex else 1.0
     else:
-        min_lex, max_lex, lex_range = 0.0, 1.0, 1.0
+        min_lex, lex_range = 0.0, 1.0
 
     for item_id in all_ids:
-        sem = semantic.get(item_id, {}).get("sem_score", 0.0)
-        raw_lex = lexical.get(item_id, {}).get("lex_score", 0.0)
-        # Min-max normalisation into [0, 1]
-        norm_lex = (raw_lex - min_lex) / lex_range if lexical else 0.0
+        s_score = semantic.get(item_id, {}).get("sem_score", 0.0)
+        
+        raw_l_score = lexical.get(item_id, {}).get("lex_score", 0.0)
+        if lexical and raw_l_score is not None:
+            l_score_norm = (raw_l_score - min_lex) / lex_range
+        else:
+            l_score_norm = 0.0
 
-        # Weighted combination: 70% semantic, 30% lexical
-        combined = 0.7 * sem + 0.3 * norm_lex
+        # Penalise short/untitled docs: scale down BM25 contribution
+        # Short snippets get inflated BM25 scores — dampen them
+        lex_snippet = lexical.get(item_id, {}).get("snippet", "")
+        snippet_len = len(lex_snippet)
+        if snippet_len < 50:
+            l_score_norm *= 0.3   # heavy penalty for very short docs
+        elif snippet_len < 150:
+            l_score_norm *= 0.7   # moderate penalty
 
-        snippet = (
-            semantic.get(item_id, {}).get("snippet")
-            or lexical.get(item_id, {}).get("snippet", "")
-        )
+        # We weight semantic search higher (0.6) than lexical (0.4)
+        combined = (s_score * 0.6) + (l_score_norm * 0.4)
+
+        # Pick the best snippet (prefer semantic if available, else lexical)
+        snippet = semantic.get(item_id, {}).get("snippet") or lexical.get(item_id, {}).get("snippet", "")
 
         results.append({
             "item_id": item_id,
-            "snippet": snippet[:200],
-            "score": round(combined, 4),
+            "score": combined,
+            "snippet": snippet
         })
 
-    results.sort(key=lambda r: r["score"], reverse=True)
-    results = results[:limit]
+    results.sort(key=lambda x: x["score"], reverse=True)
+    
+    # ── Score threshold: filter out low-quality results ───────────────
+    results = [r for r in results if r["score"] >= 0.1]
+    top_results = results[:limit]
 
-    # ── 6. Attach Metadata (Batched) ─────────────────────────────────
-    if results:
-        item_ids = [r["item_id"] for r in results]
-        items_dict = {item["id"]: item for item in db.get_items_by_ids(item_ids)}
+    # Fetch titles
+    if top_results:
+        placeholders = ",".join("?" for _ in top_results)
+        ids = [r["item_id"] for r in top_results]
+        titles = con.execute(f"SELECT id, title FROM items WHERE id IN ({placeholders})", ids).fetchall()
+        title_map = {row[0]: row[1] for row in titles}
+        for r in top_results:
+            r["title"] = title_map.get(r["item_id"], "(No title)")
 
-        for r in results:
-            item = items_dict.get(r["item_id"])
-            if item:
-                r["title"] = item.get("title") or "(Sin título)"
-                r["tags"] = item.get("tags", "")
-                r["summary"] = item.get("summary", "")
-
-    return results
+    return top_results

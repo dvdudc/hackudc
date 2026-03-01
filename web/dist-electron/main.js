@@ -4,6 +4,7 @@ const electron = require("electron");
 const path = require("node:path");
 const node_url = require("node:url");
 const node_child_process = require("node:child_process");
+const fs = require("node:fs");
 var _documentCurrentScript = typeof document !== "undefined" ? document.currentScript : null;
 const __dirname$1 = path.dirname(node_url.fileURLToPath(typeof document === "undefined" ? require("url").pathToFileURL(__filename).href : _documentCurrentScript && _documentCurrentScript.tagName.toUpperCase() === "SCRIPT" && _documentCurrentScript.src || new URL("main.js", document.baseURI).href));
 process.env.APP_ROOT = path.join(__dirname$1, "..");
@@ -20,7 +21,8 @@ function startBackendApi() {
   console.log("Starting Python backend at:", apiPath);
   const pythonExecutable = process.platform === "win32" ? path.join(appRoot, "..", ".venv", "Scripts", "python.exe") : path.join(appRoot, "..", ".venv", "bin", "python");
   apiProcess = node_child_process.spawn(pythonExecutable, [apiPath], {
-    cwd: path.join(appRoot, "..")
+    cwd: path.join(appRoot, ".."),
+    env: { ...process.env, PYTHONIOENCODING: "utf-8" }
   });
   apiProcess.stdout?.on("data", (data) => {
     console.log(`API: ${data}`);
@@ -101,6 +103,39 @@ electron.ipcMain.on("window-expand-input", () => {
       width: inputWidth,
       height: WIDGET_SIZE
     }, true);
+  }
+});
+electron.ipcMain.on("drag-out", (event, filePath) => {
+  try {
+    const absolutePath = path.resolve(filePath);
+    console.log(`[Drag Out] Requested: ${filePath} -> Resolved: ${absolutePath}`);
+    if (!fs.existsSync(absolutePath)) {
+      console.error(`❌ Drag out failed: file no longer exists on disk: ${absolutePath}`);
+      event.sender.send("drag-out-error", "El archivo buscado ya no existe en el disco fuerte (Vault) y no se puede extraer. Puede que sea un archivo temporal viejo.");
+      return;
+    }
+    const icon = electron.nativeImage.createFromDataURL("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=");
+    event.sender.startDrag({
+      file: absolutePath,
+      icon
+    });
+    console.log(`[Drag Out] Successfully started drag for: ${absolutePath}`);
+  } catch (err) {
+    console.error("❌ Drag out exception:", err);
+  }
+});
+electron.ipcMain.on("open-file", async (event, filePath) => {
+  try {
+    const absolutePath = path.resolve(filePath);
+    console.log(`[Open File] Requested: ${absolutePath}`);
+    if (!fs.existsSync(absolutePath)) {
+      console.error(`❌ Open file failed: file no longer exists on disk: ${absolutePath}`);
+      event.sender.send("drag-out-error", "El archivo ya no existe en el disco.");
+      return;
+    }
+    await electron.shell.openPath(absolutePath);
+  } catch (err) {
+    console.error("❌ Open file exception:", err);
   }
 });
 electron.ipcMain.on("window-close", () => {

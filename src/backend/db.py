@@ -74,6 +74,13 @@ def init_schema(con: duckdb.DuckDBPyConnection) -> None:
             pass
 
     con.execute(f"""
+        CREATE TABLE IF NOT EXISTS item_embeddings (
+            item_id INTEGER PRIMARY KEY REFERENCES items(id),
+            metadata_vector FLOAT[{EMBEDDING_DIM}]
+        );
+    """)
+
+    con.execute(f"""
         CREATE TABLE IF NOT EXISTS content (
             id          INTEGER PRIMARY KEY DEFAULT nextval('content_seq'),
             item_id     INTEGER REFERENCES items(id),
@@ -117,6 +124,15 @@ def init_schema(con: duckdb.DuckDBPyConnection) -> None:
             item_b INTEGER REFERENCES items(id),
             score  FLOAT,
             PRIMARY KEY (item_a, item_b)
+        );
+    """)
+
+    con.execute("CREATE SEQUENCE IF NOT EXISTS session_seq START 1;")
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS session_history (
+            id        INTEGER PRIMARY KEY DEFAULT nextval('session_seq'),
+            item_id   INTEGER REFERENCES items(id),
+            viewed_at TIMESTAMP DEFAULT now()
         );
     """)
 
@@ -234,9 +250,18 @@ def insert_connection(item_a: int, item_b: int, score: float) -> None:
     )
 
 
-def update_item_enrichment(item_id: int, title: str, tags: str, summary: str) -> None:
+def update_item_enrichment(item_id: int, title: str, tags: str, summary: str, metadata_vector: list[float] | None = None) -> None:
     """Update an item with LLM-generated enrichment data."""
     con = get_connection()
+    if metadata_vector:
+        con.execute(
+            """
+            INSERT INTO item_embeddings (item_id, metadata_vector) 
+            VALUES (?, ?) 
+            ON CONFLICT (item_id) DO UPDATE SET metadata_vector = EXCLUDED.metadata_vector;
+            """,
+            [item_id, metadata_vector]
+        )
     con.execute(
         "UPDATE items SET title = ?, tags = ?, summary = ?, enriched = TRUE WHERE id = ?;",
         [title, tags, summary, item_id],
@@ -308,3 +333,37 @@ def get_embeddings_for_item(item_id: int) -> list[list[float]]:
         "SELECT vector FROM embeddings WHERE item_id = ?;", [item_id]
     ).fetchall()
     return [list(r[0]) for r in rows]
+
+
+def log_item_view(item_id: int) -> None:
+    """Log an item view to the session history."""
+    con = get_connection()
+    con.execute("INSERT INTO session_history (item_id) VALUES (?);", [item_id])
+
+def get_recent_session_vector(limit: int = 5) -> list[float] | None:
+    """Retrieve an average normalized metadata vector for the most recently viewed items."""
+    con = get_connection()
+    rows = con.execute(
+        f"""
+        SELECT ie.metadata_vector
+        FROM session_history sh
+        JOIN item_embeddings ie ON ie.item_id = sh.item_id
+        WHERE ie.metadata_vector IS NOT NULL
+        ORDER BY sh.viewed_at DESC
+        LIMIT {limit};
+        """
+    ).fetchall()
+    
+    if not rows:
+        return None
+        
+    vecs = [r[0] for r in rows]
+    n = len(vecs)
+    dim = len(vecs[0])
+    avg_vec = [sum(vec[i] for vec in vecs) / n for i in range(dim)]
+    
+    import math
+    norm = math.sqrt(sum(v * v for v in avg_vec))
+    if norm > 0:
+        avg_vec = [v / norm for v in avg_vec]
+    return avg_vec

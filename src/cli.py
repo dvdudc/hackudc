@@ -19,6 +19,12 @@ import csv
 import sys
 import io
 import logging
+import threading
+
+# Force UTF-8 for Windows consoles to support Emojis
+if sys.stdout.encoding.lower() != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8')
+
 from pathlib import Path
 
 import typer
@@ -91,16 +97,25 @@ def ingest(
                 )
             )
         except DuplicateError as e:
+            if os.path.exists(vault_path_str):
+                os.remove(vault_path_str)
             console.print(
                 Panel(
                     f"[yellow]Item #{e.existing_id}[/yellow] already exists.\n"
                     f"Skipping ingestion to save resources.\n"
-                    f"Source: {filepath}",
+                    f"Source: {original_fp}",
                     title="⚠️  Duplicate Detected",
                     border_style="yellow",
                 )
             )
         except ValueError as e:
+            if os.path.exists(vault_path_str):
+                os.remove(vault_path_str)
+            console.print(f"[red]❌ {e}[/red]")
+            raise typer.Exit(code=1)
+        except Exception as e:
+            if os.path.exists(vault_path_str):
+                os.remove(vault_path_str)
             console.print(f"[red]❌ {e}[/red]")
             raise typer.Exit(code=1)
         return
@@ -108,7 +123,7 @@ def ingest(
     # Multiple files — parallel via IngestQueue
     console.print(f"[bold]📦 Queuing {len(resolved)} file(s) for parallel ingestion...[/bold]\n")
     queue = get_ingest_queue()
-    queue.submit_batch([str(fp) for fp in resolved])
+    queue.submit_batch([vp for vp, _ in vault_paths])
     results = queue.drain()
 
     # Summary table
@@ -119,17 +134,23 @@ def ingest(
     table.add_column("ID", width=6)
 
     ingested = duplicates = errors = 0
-    for i, r in enumerate(results, 1):
-        name = Path(r.path).name
+    # Map back the vault paths to original paths for display
+    # Results come out in same order as submitted queue
+    for i, (r, (_, orig_fp)) in enumerate(zip(results, vault_paths), 1):
+        name = orig_fp.name
         if r.is_duplicate:
             duplicates += 1
             table.add_row(str(i), name, "[yellow]⚠️  Duplicate[/yellow]", str(r.duplicate_id))
+            if os.path.exists(r.path):
+                os.remove(r.path)
         elif r.success:
             ingested += 1
             table.add_row(str(i), name, "[green]✅ OK[/green]", str(r.item_id))
         else:
             errors += 1
             table.add_row(str(i), name, f"[red]❌ {r.error}[/red]", "—")
+            if os.path.exists(r.path):
+                os.remove(r.path)
 
     console.print(table)
     console.print(
@@ -211,7 +232,7 @@ def show(
     item_id: int = typer.Argument(..., help="Item ID to display."),
 ):
     """Show details of a specific item, including connections."""
-    from backend.db import get_item, get_chunks_for_item
+    from backend.db import get_item, get_chunks_for_item, log_item_view
     from backend.connections import get_connections
 
     logging.info(f"Showing details for item #{item_id}")
@@ -219,6 +240,9 @@ def show(
     if item is None:
         console.print(f"[red]❌ Item #{item_id} not found.[/red]")
         raise typer.Exit(code=1)
+        
+    # Log the view for session context
+    log_item_view(item_id)
 
     # ── Item details ─────────────────────────────────────────────────
     title = item.get("title") or "(sin título)"

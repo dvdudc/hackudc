@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, screen } from 'electron'
+import { app, BrowserWindow, ipcMain, screen, shell } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn, ChildProcess } from 'node:child_process'
@@ -39,7 +39,8 @@ function startBackendApi() {
         : path.join(appRoot, '..', '.venv', 'bin', 'python');
 
     apiProcess = spawn(pythonExecutable, [apiPath], {
-        cwd: path.join(appRoot, '..')
+        cwd: path.join(appRoot, '..'),
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
     });
 
     apiProcess.stdout?.on('data', (data) => {
@@ -140,6 +141,48 @@ ipcMain.on("window-expand-input", () => {
             width: inputWidth,
             height: WIDGET_SIZE
         }, true);
+    }
+})
+
+import fs from 'node:fs';
+import { nativeImage } from 'electron';
+
+ipcMain.on("drag-out", (event, filePath: string) => {
+    try {
+        const absolutePath = path.resolve(filePath);
+        console.log(`[Drag Out] Requested: ${filePath} -> Resolved: ${absolutePath}`);
+
+        if (!fs.existsSync(absolutePath)) {
+            console.error(`❌ Drag out failed: file no longer exists on disk: ${absolutePath}`);
+            event.sender.send("drag-out-error", "El archivo buscado ya no existe en el disco fuerte (Vault) y no se puede extraer. Puede que sea un archivo temporal viejo.");
+            return;
+        }
+
+        // Use a guaranteed 1x1 transparent PNG. SVGs often cause silent drops on Windows Drag APIs.
+        const icon = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=');
+
+        event.sender.startDrag({
+            file: absolutePath,
+            icon: icon,
+        });
+        console.log(`[Drag Out] Successfully started drag for: ${absolutePath}`);
+    } catch (err) {
+        console.error("❌ Drag out exception:", err);
+    }
+})
+
+ipcMain.on("open-file", async (event, filePath: string) => {
+    try {
+        const absolutePath = path.resolve(filePath);
+        console.log(`[Open File] Requested: ${absolutePath}`);
+        if (!fs.existsSync(absolutePath)) {
+            console.error(`❌ Open file failed: file no longer exists on disk: ${absolutePath}`);
+            event.sender.send("drag-out-error", "El archivo ya no existe en el disco.");
+            return;
+        }
+        await shell.openPath(absolutePath);
+    } catch (err) {
+        console.error("❌ Open file exception:", err);
     }
 })
 
