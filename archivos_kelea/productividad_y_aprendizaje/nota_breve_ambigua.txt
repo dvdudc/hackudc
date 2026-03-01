@@ -1,0 +1,2 @@
+Revisar sistema de organización actual.
+Hay demasiadas carpetas y poca conexión entre ideas.
