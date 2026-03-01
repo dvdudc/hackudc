@@ -11,7 +11,7 @@ import uuid
 
 from backend.ingest import ingest_file, DuplicateError, get_ingest_queue, IngestResult, detect_mime
 from backend.search import search as search_docs
-from backend.db import get_item, get_chunks_for_item, delete_item
+from backend.db import get_item, get_chunks_for_item, delete_item, add_tag_to_item
 from backend.connections import get_connections
 
 VAULT_DIR = Path("blackvault_data/files").resolve()
@@ -46,6 +46,12 @@ class IngestResponse(BaseModel):
     message: str
     documentId: str
 
+class UrlIngestRequest(BaseModel):
+    url: str
+
+class TagRequest(BaseModel):
+    tag: str
+
 class BatchIngestItemResponse(BaseModel):
     filename: str
     success: bool
@@ -60,11 +66,11 @@ class BatchIngestResponse(BaseModel):
     results: List[BatchIngestItemResponse]
 
 @app.get("/search", response_model=List[DocumentResult])
-def api_search(q: str):
+def api_search(q: str, strict: bool = False):
     if not q.strip():
         return []
     
-    results = search_docs(q, limit=10)
+    results = search_docs(q, limit=10, strict=strict)
     docs = []
     for r in results:
         # Some tags might be None or empty string
@@ -134,6 +140,53 @@ def api_ingest(file: UploadFile = File(...)):
             os.remove(vault_path)
         raise HTTPException(status_code=500, detail=str(e))
 
+
+import urllib.request
+import re
+
+def extract_text_from_html(html_content: str) -> str:
+    text = re.sub(r'<style[^>]*>[\s\S]*?</style>', '', html_content, flags=re.IGNORECASE)
+    text = re.sub(r'<script[^>]*>[\s\S]*?</script>', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'<[^>]+>', ' ', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
+@app.post("/ingest/url", response_model=IngestResponse)
+def api_ingest_url(req: UrlIngestRequest):
+    try:
+        req_obj = urllib.request.Request(req.url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req_obj, timeout=10) as response:
+            html_content = response.read().decode('utf-8', errors='ignore')
+            
+        parsed_text = extract_text_from_html(html_content)
+        if not parsed_text:
+            raise ValueError("No text found on page")
+            
+        import uuid
+        safe_filename = req.url.split('//')[-1].replace("/", "_").replace("?", "_")[:50] + ".txt"
+        unique_filename = f"url_{uuid.uuid4().hex}_{safe_filename}"
+        vault_path = VAULT_DIR / unique_filename
+        
+        vault_path.write_text(parsed_text, encoding="utf-8")
+        item_id = ingest_file(str(vault_path), parsed_text)
+        
+        return IngestResponse(
+            success=True,
+            message=f"URL {req.url} successfully ingested.",
+            documentId=str(item_id)
+        )
+    except DuplicateError as e:
+        if 'vault_path' in locals() and vault_path.exists():
+            os.remove(vault_path)
+        return IngestResponse(
+            success=True,
+            message="Document already exists.",
+            documentId=str(e.existing_id)
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/ingest/batch", response_model=BatchIngestResponse)
 def api_ingest_batch(files: List[UploadFile] = File(...)):
@@ -272,6 +325,19 @@ def api_delete_document(doc_id: str):
             print(f"Warning: Could not remove file {source_path}: {e}")
             
     return DeleteResponse(success=True, message=f"Document {item_id} deleted successfully.")
+
+@app.post("/document/{doc_id}/tags", response_model=DeleteResponse)
+def api_add_tag(doc_id: str, req: TagRequest):
+    try:
+        item_id = int(doc_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid Document ID")
+    
+    success = add_tag_to_item(item_id, req.tag)
+    if not success:
+        raise HTTPException(status_code=404, detail="Document not found or update failed")
+        
+    return DeleteResponse(success=True, message=f"Tag '{req.tag}' added to document {item_id}.")
 
 if __name__ == "__main__":
     import uvicorn

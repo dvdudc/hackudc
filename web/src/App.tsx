@@ -11,6 +11,8 @@ function App() {
   const {
     search,
     ingest,
+    ingestUrl,
+    addTag,
     getDetail,
     searchResults,
     searchState,
@@ -66,8 +68,88 @@ function App() {
   };
 
   const handleTextSubmit = async (text: string) => {
-    // Treat the text as a seach query per user request "para preguntarle al agujero negro"
-    search(text);
+    const trimmed = text.trim();
+
+    // >n command: Note creation
+    if (trimmed.startsWith('>n ')) {
+      let noteContent = trimmed.substring(3).trim();
+      const match = noteContent.match(/^["'](.*)["']$/);
+      if (match) noteContent = match[1];
+      if (noteContent) {
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const file = new File([noteContent], `nota_${timestamp}.txt`, { type: 'text/plain' });
+        try {
+          await ingest(file);
+          handleExpand();
+        } catch (err) {
+          console.error('Error creating note:', err);
+          alert('Error creando nota: ' + (err as Error).message);
+        }
+      }
+      return;
+    }
+
+    // >url command: URL ingestion
+    if (trimmed.startsWith('>url ')) {
+      const url = trimmed.substring(5).trim();
+      if (url) {
+        try {
+          await ingestUrl(url);
+          handleExpand();
+        } catch (err) {
+          console.error('Error ingesting URL:', err);
+          alert('Error procesando URL: ' + (err as Error).message);
+        }
+      }
+      return;
+    }
+
+    // >rm or >del command: Remove document by ID
+    if (trimmed.startsWith('>rm ') || trimmed.startsWith('>del ')) {
+      const id = trimmed.substring(trimmed.indexOf(' ') + 1).trim();
+      if (id) {
+        try {
+          await removeDocument(id);
+          alert(`Documento ${id} eliminado correctamente.`);
+        } catch (err) {
+          console.error('Error deleting document:', err);
+          alert('Error borrando documento: ' + (err as Error).message);
+        }
+      }
+      return;
+    }
+
+    // >tag command: Add tag to document ID
+    if (trimmed.startsWith('>tag ')) {
+      const parts = trimmed.substring(5).trim().split(' ');
+      if (parts.length >= 2) {
+        const id = parts[0];
+        const tag = parts.slice(1).join(' ');
+        try {
+          await addTag(id, tag);
+          alert(`Etiqueta '${tag}' añadida al documento ${id}.`);
+        } catch (err) {
+          console.error('Error adding tag:', err);
+          alert('Error añadiendo etiqueta: ' + (err as Error).message);
+        }
+      } else {
+        alert("Uso incorrecto. Formato esperado: >tag [ID] [etiqueta]");
+      }
+      return;
+    }
+
+    // >s or >find command: Strict lexical search
+    if (trimmed.startsWith('>s ') || trimmed.startsWith('>find ')) {
+      const query = trimmed.substring(trimmed.indexOf(' ') + 1).trim();
+      if (query) {
+        search(query, true);
+        handleExpand();
+      }
+      return;
+    }
+
+    // Default: treat the text as a natural language search query
+    search(text, false);
     handleExpand();
   };
 

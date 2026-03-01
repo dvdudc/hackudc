@@ -267,6 +267,27 @@ def update_item_enrichment(item_id: int, title: str, tags: str, summary: str, me
         [title, tags, summary, item_id],
     )
 
+def add_tag_to_item(item_id: int, new_tag: str) -> bool:
+    """Append a tag to an item's tags column."""
+    con = get_connection()
+    try:
+        item = get_item(item_id)
+        if not item:
+            return False
+            
+        current_tags = item.get("tags") or ""
+        tag_list = [t.strip() for t in current_tags.split(",") if t.strip()]
+        if new_tag not in tag_list:
+            tag_list.append(new_tag)
+            
+        new_tags_str = ", ".join(tag_list)
+        con.execute("UPDATE items SET tags = ? WHERE id = ?;", [new_tags_str, item_id])
+        return True
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return False
+
 def delete_item(item_id: int) -> bool:
     """Delete an item and all its associated data from the database."""
     con = get_connection()
