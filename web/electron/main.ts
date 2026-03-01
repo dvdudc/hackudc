@@ -149,17 +149,31 @@ import { nativeImage } from 'electron';
 
 ipcMain.on("drag-out", (event, filePath: string) => {
     try {
-        const absolutePath = path.resolve(filePath);
-        console.log(`[Drag Out] Requested: ${filePath} -> Resolved: ${absolutePath}`);
+        // The DB might send paths with literal '...' in them (like C:\Users\...\file.txt)
+        // or relative paths. We must extract just the filename and rebuild the correct path
+        // pointing to the blackvault_data/files directory.
+        const appRoot = process.env.APP_ROOT as string;
+        const vaultFilesDir = path.join(appRoot, '..', 'blackvault_data', 'files');
+        const fileNameParts = filePath.replace(/\\/g, '/').split('/');
+        const fileName = fileNameParts[fileNameParts.length - 1];
+        const absolutePath = path.join(vaultFilesDir, fileName);
+
+        console.log("======================");
+        console.log(`[Drag Out Debug] Raw filePath string received: "${filePath}"`);
+        console.log(`[Drag Out Debug] Parts array: ${JSON.stringify(fileNameParts)}`);
+        console.log(`[Drag Out Debug] Extracted fileName: "${fileName}"`);
+        console.log(`[Drag Out Debug] Rebuilt absolute path: "${absolutePath}"`);
+        console.log(`[Drag Out Debug] fs.existsSync result: ${fs.existsSync(absolutePath)}`);
+        console.log("======================");
 
         if (!fs.existsSync(absolutePath)) {
-            console.error(`❌ Drag out failed: file no longer exists on disk: ${absolutePath}`);
-            event.sender.send("drag-out-error", "El archivo buscado ya no existe en el disco fuerte (Vault) y no se puede extraer. Puede que sea un archivo temporal viejo.");
+            console.error(`❌ Drag out failed: file no longer exists on disk: "${absolutePath}"`);
+            event.sender.send("drag-out-error", `El archivo buscado ya no existe en el Vault y no se puede extraer.\nRuta buscada: ${absolutePath}`);
             return;
         }
 
-        // Use a guaranteed 1x1 transparent PNG. SVGs often cause silent drops on Windows Drag APIs.
-        const icon = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=');
+        // Use a solid RED icon resized to 32x32 so the user actually sees they are dragging something!
+        const icon = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==').resize({ width: 32, height: 32 });
 
         event.sender.startDrag({
             file: absolutePath,
@@ -173,8 +187,19 @@ ipcMain.on("drag-out", (event, filePath: string) => {
 
 ipcMain.on("open-file", async (event, filePath: string) => {
     try {
-        const absolutePath = path.resolve(filePath);
-        console.log(`[Open File] Requested: ${absolutePath}`);
+        const appRoot = process.env.APP_ROOT as string;
+        const vaultFilesDir = path.join(appRoot, '..', 'blackvault_data', 'files');
+        const fileNameParts = filePath.replace(/\\/g, '/').split('/');
+        const fileName = fileNameParts[fileNameParts.length - 1];
+        const absolutePath = path.join(vaultFilesDir, fileName);
+
+        console.log("======================");
+        console.log(`[Open File Debug] Raw filePath string received: "${filePath}"`);
+        console.log(`[Open File Debug] Parts array: ${JSON.stringify(fileNameParts)}`);
+        console.log(`[Open File Debug] Extracted fileName: "${fileName}"`);
+        console.log(`[Open File Debug] Rebuilt absolute path: "${absolutePath}"`);
+        console.log(`[Open File Debug] fs.existsSync result: ${fs.existsSync(absolutePath)}`);
+        console.log("======================");
         if (!fs.existsSync(absolutePath)) {
             console.error(`❌ Open file failed: file no longer exists on disk: ${absolutePath}`);
             event.sender.send("drag-out-error", "El archivo ya no existe en el disco.");

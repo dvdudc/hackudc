@@ -1,14 +1,15 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { DocumentResult } from '@/services/api';
-import { Sparkles, Tag, ExternalLink } from 'lucide-react';
+import { Sparkles, Tag, ExternalLink, Trash2 } from 'lucide-react';
 
 interface SearchResultsProps {
     results: DocumentResult[];
     onSelect: (id: string) => void;
+    onDelete?: (id: string) => void;
 }
 
-export const SearchResults: React.FC<SearchResultsProps> = ({ results, onSelect }) => {
+export const SearchResults: React.FC<SearchResultsProps> = ({ results, onSelect, onDelete }) => {
     console.log("SearchResults rendered with:", results);
 
     return (
@@ -32,13 +33,18 @@ export const SearchResults: React.FC<SearchResultsProps> = ({ results, onSelect 
                         }}
                         onClick={() => onSelect(result.id)}
                         draggable={true}
-                        onDragStart={(e) => {
+                        onDragStartCapture={(e: React.DragEvent<HTMLDivElement>) => {
                             e.preventDefault();
-                            if (window.ipcRenderer && result.source_path) {
-                                window.ipcRenderer.send('drag-out', result.source_path);
+                            e.dataTransfer.setData('text/plain', result.source_path || '');
+                            if (window.ipcRenderer) {
+                                if (result.source_path) {
+                                    window.ipcRenderer.send('drag-out', result.source_path);
+                                } else {
+                                    window.alert('Este documento no tiene un archivo físico asociado para arrastrar.');
+                                }
                             }
                         }}
-                        className="group cursor-pointer p-6 rounded-2xl bg-black border border-white/10 hover:border-white/30 transition-all duration-500 hover:shadow-[0_0_40px_rgba(255,255,255,0.05)] relative overflow-hidden"
+                        className="draggable-item group cursor-pointer p-6 rounded-2xl bg-black border border-white/10 hover:border-white/30 transition-all duration-500 hover:shadow-[0_0_40px_rgba(255,255,255,0.05)] relative overflow-hidden"
                     >
                         {/* Hover flare effect */}
                         <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
@@ -60,6 +66,20 @@ export const SearchResults: React.FC<SearchResultsProps> = ({ results, onSelect 
                                         title="Abrir archivo directamente (Alternativa a arrastrar)"
                                     >
                                         <ExternalLink size={14} />
+                                    </button>
+                                )}
+                                {onDelete && (
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (window.confirm(`¿Estás seguro de que quieres eliminar permanentemente el documento "${result.title || 'Unknown'}" y todos sus vectores?`)) {
+                                                onDelete(result.id);
+                                            }
+                                        }}
+                                        className="p-1.5 rounded-full bg-red-500/10 hover:bg-red-500/30 text-white/60 hover:text-red-400 border border-red-500/10 transition-colors"
+                                        title="Eliminar documento del Vault"
+                                    >
+                                        <Trash2 size={14} />
                                     </button>
                                 )}
                                 {result.score && (

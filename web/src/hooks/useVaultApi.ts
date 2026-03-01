@@ -8,6 +8,7 @@ export function useVaultApi() {
     const [searchState, setSearchState] = useState<RequestState>('idle');
     const [ingestState, setIngestState] = useState<RequestState>('idle');
     const [detailState, setDetailState] = useState<RequestState>('idle');
+    const [deleteState, setDeleteState] = useState<RequestState>('idle');
 
     const [searchResults, setSearchResults] = useState<DocumentResult[]>([]);
     const [currentDetail, setCurrentDetail] = useState<DocumentDetail | null>(null);
@@ -59,6 +60,22 @@ export function useVaultApi() {
         }
     }, []);
 
+    const removeDocument = useCallback(async (id: string) => {
+        try {
+            setDeleteState('processing');
+            setError(null);
+            const response = await vaultApi.deleteDocument(id);
+            // Optionally remove it from current search results locally:
+            setSearchResults(prev => prev.filter(result => result.id !== id));
+            setDeleteState('success');
+            return response;
+        } catch (err) {
+            setError('Failed to delete document.');
+            setDeleteState('error');
+            throw err;
+        }
+    }, []);
+
     const resetStates = useCallback(() => {
         setSearchState('idle');
         setIngestState('idle');
@@ -70,12 +87,14 @@ export function useVaultApi() {
         searchState,
         ingestState,
         detailState,
+        deleteState,
         searchResults,
         currentDetail,
         error,
         search,
         ingest,
         getDetail,
+        removeDocument,
         resetStates
     };
 }

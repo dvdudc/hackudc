@@ -43,7 +43,7 @@ export const vaultApi = {
      */
     ingest: async (file: File): Promise<IngestResponse> => {
         const formData = new FormData();
-        formData.append("file", file, file.name || "document.txt");
+        formData.append("file", file);
 
         const response = await fetch(`${API_BASE}/ingest`, {
             method: "POST",
@@ -67,6 +67,22 @@ export const vaultApi = {
         if (!response.ok) {
             const err = await response.json().catch(() => ({}));
             throw new Error(err.detail || `Get detail failed: ${response.statusText}`);
+        }
+
+        return response.json();
+    },
+
+    /**
+     * Delete a document and all related vectors from the Vault
+     */
+    deleteDocument: async (id: string): Promise<{ success: boolean; message: string }> => {
+        const response = await fetch(`${API_BASE}/document/${encodeURIComponent(id)}`, {
+            method: 'DELETE',
+        });
+
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.detail || `Delete failed: ${response.statusText}`);
         }
 
         return response.json();
