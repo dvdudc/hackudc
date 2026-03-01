@@ -71,6 +71,9 @@ def ingest(
             if mime.startswith("image/"):
                 from backend.ocr import extract_text_from_image
                 parsed_text = extract_text_from_image(str(filepath))
+            elif mime == "application/pdf":
+                from backend.pdf import extract_text_from_pdf
+                parsed_text = extract_text_from_pdf(str(filepath))
             else:
                 try:
                     parsed_text = filepath.read_text(encoding="utf-8")
