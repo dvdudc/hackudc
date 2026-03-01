@@ -106,11 +106,8 @@ def ingest_file(path: str, parsed_text: str, *, _rebuild_indexes: bool = True) -
 
     # 3. MIME Check
     mime = detect_mime(str(filepath))
-    if filepath.suffix.lower() == ".ogg":
-        mime = "audio/ogg"
-        
-    if not (mime.startswith("text/") or mime.startswith("image/") or mime.startswith("audio/")):
-        raise ValueError(f"Unsupported file type: {mime}. Only text/*, image/* and audio/* supported.")
+    if not (mime.startswith("text/") or mime.startswith("image/") or mime == "application/pdf"):
+        raise ValueError(f"Unsupported file type: {mime}. Only text/*, image/* and application/pdf supported.")
 
     # 4. Use provided parsed text
     text = parsed_text
@@ -131,10 +128,11 @@ def ingest_file(path: str, parsed_text: str, *, _rebuild_indexes: bool = True) -
     print("🧠 Generating embeddings...")
     vectors = get_embeddings_batch(chunks)
 
-    # ── 5. Store ─────────────────────────────────────────────────────
-    mtime = os.path.getmtime(str(filepath))
-    source_type = "image" if mime.startswith("image/") else "audio" if mime.startswith("audio/") else "text"
-    item_id = db.insert_item(source_path=str(filepath), source_type=source_type, file_hash=file_hash, file_mtime=mtime)
+    # 7. Store — all DB writes under lock
+    with _db_lock:
+        mtime = os.path.getmtime(str(filepath))
+        source_type = "pdf" if mime == "application/pdf" else "image" if mime.startswith("image/") else "text"
+        item_id = db.insert_item(source_path=str(filepath), source_type=source_type, file_hash=file_hash, file_mtime=mtime)
 
         for i, (chunk, vec) in enumerate(zip(chunks, vectors)):
             content_id = db.insert_content(item_id=item_id, chunk_index=i, body=chunk)

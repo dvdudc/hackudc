@@ -64,38 +64,37 @@ def ingest(
         console.print("[red]❌ No valid files to ingest.[/red]")
         raise typer.Exit(code=1)
 
-    try:
-        logging.info(f"Ingesting file: {filepath}")
-        
-        import mimetypes
-        mime, _ = mimetypes.guess_type(str(filepath))
-        mime = mime or "application/octet-stream"
-        
-        # OGG files are sometimes detected as video/ogg or application/ogg 
-        # but they are just audio for us.
-        if filepath.suffix.lower() == ".ogg":
-            mime = "audio/ogg"
-        
-        if mime.startswith("image/"):
-            from backend.ocr import extract_text_from_image
-            parsed_text = extract_text_from_image(str(filepath))
-        elif mime.startswith("audio/"):
-            from backend.stt import extract_text_from_audio
-            parsed_text = extract_text_from_audio(str(filepath))
-        else:
-            try:
-                parsed_text = filepath.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                raise ValueError("File encoding error. Must be UTF-8.")
-                
-        item_id = ingest_file(str(filepath), parsed_text)
-        logging.info(f"Successfully ingested item #{item_id}")
-        console.print(
-            Panel(
-                f"[green]Item #{item_id}[/green] stored successfully.\n"
-                f"Source: {filepath}",
-                title="✅ Ingested",
-                border_style="green",
+    # Single file — direct (backward-compatible behaviour)
+    if len(resolved) == 1:
+        filepath = resolved[0]
+        try:
+            logging.info(f"Ingesting file: {filepath}")
+            
+            import mimetypes
+            mime, _ = mimetypes.guess_type(str(filepath))
+            mime = mime or "application/octet-stream"
+            
+            if mime.startswith("image/"):
+                from backend.ocr import extract_text_from_image
+                parsed_text = extract_text_from_image(str(filepath))
+            elif mime == "application/pdf":
+                from backend.pdf import extract_text_from_pdf
+                parsed_text = extract_text_from_pdf(str(filepath))
+            else:
+                try:
+                    parsed_text = filepath.read_text(encoding="utf-8")
+                except UnicodeDecodeError:
+                    raise ValueError("File encoding error. Must be UTF-8.")
+                    
+            item_id = ingest_file(str(filepath), parsed_text=parsed_text)
+            logging.info(f"Successfully ingested item #{item_id}")
+            console.print(
+                Panel(
+                    f"[green]Item #{item_id}[/green] stored successfully.\n"
+                    f"Source: {filepath}",
+                    title="✅ Ingested",
+                    border_style="green",
+                )
             )
         except DuplicateError as e:
             if os.path.exists(vault_path_str):
