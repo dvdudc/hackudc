@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, screen, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, screen, shell, globalShortcut } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn, ChildProcess } from 'node:child_process'
@@ -122,7 +122,7 @@ ipcMain.on("window-shrink", () => {
             y: screenHeight - WIDGET_SIZE - 20,
             width: WIDGET_SIZE,
             height: WIDGET_SIZE
-        }, true)
+        })
         win.setResizable(false);
     }
 })
@@ -140,7 +140,7 @@ ipcMain.on("window-expand-input", () => {
             y: screenHeight - WIDGET_SIZE - 20,
             width: inputWidth,
             height: WIDGET_SIZE
-        }, true);
+        });
     }
 })
 
@@ -237,6 +237,10 @@ app.on('quit', () => {
     }
 })
 
+app.on('will-quit', () => {
+    globalShortcut.unregisterAll()
+})
+
 app.on('activate', () => {
     // On OS X it's common to re-create a window in the app when the
     // dock icon is clicked and there are no other windows open.
@@ -248,4 +252,27 @@ app.on('activate', () => {
 app.whenReady().then(() => {
     startBackendApi()
     createWindow()
+
+    // Global Shortcuts
+    globalShortcut.register('CommandOrControl+Shift+B', () => {
+        if (win) {
+            if (win.isVisible()) {
+                win.hide()
+            } else {
+                win.show()
+                win.focus()
+            }
+        }
+    })
+
+    globalShortcut.register('CommandOrControl+Shift+Space', () => {
+        if (win) {
+            if (!win.isVisible()) {
+                win.show()
+            }
+            win.focus()
+            // Tell React to expand the window and focus the search box
+            win.webContents.send('shortcut-expand-search')
+        }
+    })
 })

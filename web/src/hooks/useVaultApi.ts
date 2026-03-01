@@ -14,7 +14,7 @@ export function useVaultApi() {
     const [currentDetail, setCurrentDetail] = useState<DocumentDetail | null>(null);
     const [error, setError] = useState<string | null>(null);
 
-    const search = useCallback(async (query: string) => {
+    const search = useCallback(async (query: string, strict: boolean = false) => {
         if (!query.trim()) {
             setSearchResults([]);
             setSearchState('idle');
@@ -24,7 +24,7 @@ export function useVaultApi() {
         try {
             setSearchState('processing');
             setError(null);
-            const results = await vaultApi.search(query);
+            const results = await vaultApi.search(query, strict);
             setSearchResults(results);
             setSearchState('success');
         } catch (err) {
@@ -76,6 +76,31 @@ export function useVaultApi() {
         }
     }, []);
 
+    const ingestUrl = useCallback(async (url: string) => {
+        try {
+            setIngestState('processing');
+            setError(null);
+            const response = await vaultApi.ingestUrl(url);
+            setIngestState('success');
+            return response;
+        } catch (err) {
+            setError('Failed to ingest URL.');
+            setIngestState('error');
+            throw err;
+        }
+    }, []);
+
+    const addTag = useCallback(async (id: string, tag: string) => {
+        try {
+            setError(null);
+            const response = await vaultApi.addTag(id, tag);
+            return response;
+        } catch (err) {
+            setError('Failed to add tag.');
+            throw err;
+        }
+    }, []);
+
     const resetStates = useCallback(() => {
         setSearchState('idle');
         setIngestState('idle');
@@ -93,6 +118,8 @@ export function useVaultApi() {
         error,
         search,
         ingest,
+        ingestUrl,
+        addTag,
         getDetail,
         removeDocument,
         resetStates

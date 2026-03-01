@@ -9,6 +9,8 @@ interface WidgetMenuProps {
     onExit: () => void;
     onTextSubmit: (text: string) => void;
     onClipboardIngest: () => void;
+    forceInputOpen?: boolean;
+    setForceInputOpen?: (val: boolean) => void;
 }
 
 export const WidgetMenu: React.FC<WidgetMenuProps> = ({
@@ -17,10 +19,18 @@ export const WidgetMenu: React.FC<WidgetMenuProps> = ({
     onExpand,
     onExit,
     onTextSubmit,
-    onClipboardIngest
+    onClipboardIngest,
+    forceInputOpen,
+    setForceInputOpen
 }) => {
     const [showInput, setShowInput] = useState(false);
     const [inputText, setInputText] = useState('');
+
+    React.useEffect(() => {
+        if (forceInputOpen) {
+            setShowInput(true);
+        }
+    }, [forceInputOpen]);
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -28,6 +38,7 @@ export const WidgetMenu: React.FC<WidgetMenuProps> = ({
             onTextSubmit(inputText);
             setInputText('');
             setShowInput(false);
+            if (setForceInputOpen) setForceInputOpen(false);
             onClose();
         }
     };
@@ -49,7 +60,8 @@ export const WidgetMenu: React.FC<WidgetMenuProps> = ({
                             className="fixed inset-0"
                             onClick={() => {
                                 setShowInput(false);
-                                if (window.ipcRenderer) window.ipcRenderer.send('window-shrink');
+                                if (setForceInputOpen) setForceInputOpen(false);
+                                if (window.ipcRenderer) setTimeout(() => window.ipcRenderer.send('window-shrink'), 300);
                                 onClose();
                             }}
                         />
@@ -122,7 +134,8 @@ export const WidgetMenu: React.FC<WidgetMenuProps> = ({
                                         type="button"
                                         onClick={() => {
                                             setShowInput(false);
-                                            if (window.ipcRenderer) window.ipcRenderer.send('window-shrink');
+                                            if (setForceInputOpen) setForceInputOpen(false);
+                                            if (window.ipcRenderer) setTimeout(() => window.ipcRenderer.send('window-shrink'), 300);
                                         }}
                                         className="text-white/60 hover:text-white text-[9px] px-1 py-0.5"
                                     >

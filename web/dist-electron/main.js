@@ -87,7 +87,7 @@ electron.ipcMain.on("window-shrink", () => {
       y: screenHeight - WIDGET_SIZE - 20,
       width: WIDGET_SIZE,
       height: WIDGET_SIZE
-    }, true);
+    });
     win.setResizable(false);
   }
 });
@@ -102,7 +102,7 @@ electron.ipcMain.on("window-expand-input", () => {
       y: screenHeight - WIDGET_SIZE - 20,
       width: inputWidth,
       height: WIDGET_SIZE
-    }, true);
+    });
   }
 });
 electron.ipcMain.on("drag-out", (event, filePath) => {
@@ -179,6 +179,9 @@ electron.app.on("quit", () => {
     apiProcess.kill();
   }
 });
+electron.app.on("will-quit", () => {
+  electron.globalShortcut.unregisterAll();
+});
 electron.app.on("activate", () => {
   if (electron.BrowserWindow.getAllWindows().length === 0) {
     createWindow();
@@ -187,6 +190,25 @@ electron.app.on("activate", () => {
 electron.app.whenReady().then(() => {
   startBackendApi();
   createWindow();
+  electron.globalShortcut.register("CommandOrControl+Shift+B", () => {
+    if (win) {
+      if (win.isVisible()) {
+        win.hide();
+      } else {
+        win.show();
+        win.focus();
+      }
+    }
+  });
+  electron.globalShortcut.register("CommandOrControl+Shift+Space", () => {
+    if (win) {
+      if (!win.isVisible()) {
+        win.show();
+      }
+      win.focus();
+      win.webContents.send("shortcut-expand-search");
+    }
+  });
 });
 exports.MAIN_DIST = MAIN_DIST;
 exports.RENDERER_DIST = RENDERER_DIST;

@@ -23,7 +23,7 @@ def get_embedding(text: str) -> list[float]:
     return list(result.embeddings[0].values)
 
 
-def search(query: str, limit: int = 10, use_enrichment: bool = True) -> list[dict]:
+def search(query: str, limit: int = 10, use_enrichment: bool = True, strict: bool = False) -> list[dict]:
     con = db.get_connection()
 
     semantic_query = query
@@ -112,39 +112,41 @@ def search(query: str, limit: int = 10, use_enrichment: bool = True) -> list[dic
             logging.warning(f"Intent parsing error: {e}")
 
     # ── 1. Generate query embedding ──────────────────────────────────
-    query_vec = get_embedding(semantic_query)
+    semantic_rows = []
+    if not strict:
+        query_vec = get_embedding(semantic_query)
 
-    # ── 2. Semantic Search (Vector / HNSW) ───────────────────────────
-    vector_str = "[" + ", ".join(map(str, query_vec)) + "]"
+        # ── 2. Semantic Search (Vector / HNSW) ───────────────────────────
+        vector_str = "[" + ", ".join(map(str, query_vec)) + "]"
 
-    try:
-        if sql_filter.strip() == "1=1":
-            semantic_rows = con.execute(
-                f"""
-                WITH top_embeddings AS (
-                    SELECT e.item_id, e.content_id, ie.metadata_vector,
-                           array_cosine_distance(e.vector, {vector_str}::FLOAT[{EMBEDDING_DIM}]) AS dist
-                    FROM embeddings e
-                    JOIN items i ON i.id = e.item_id
-                    LEFT JOIN item_embeddings ie ON ie.item_id = e.item_id
-                    ORDER BY array_cosine_distance(e.vector, {vector_str}::FLOAT[{EMBEDDING_DIM}])
-                    LIMIT {limit * 2}
-                )
-                SELECT t.item_id, c.body AS snippet, 
-                       (1.0 - t.dist) AS chunk_score,
-                       CASE WHEN t.metadata_vector IS NOT NULL 
-                            THEN (1.0 - array_cosine_distance(t.metadata_vector, {vector_str}::FLOAT[{EMBEDDING_DIM}])) 
-                            ELSE 0.0 END AS meta_score,
-                       {
-                           f"CASE WHEN t.metadata_vector IS NOT NULL THEN (1.0 - array_cosine_distance(t.metadata_vector, {session_vector_str}::FLOAT[{EMBEDDING_DIM}])) ELSE 0.0 END"
-                           if session_vector_str else "0.0"
-                       } AS session_score
-                FROM top_embeddings t
-                JOIN content c ON c.id = t.content_id
-                """
-            ).fetchall()
-        else:
-            semantic_rows = con.execute(
+        try:
+            if sql_filter.strip() == "1=1":
+                semantic_rows = con.execute(
+                    f"""
+                    WITH top_embeddings AS (
+                        SELECT e.item_id, e.content_id, ie.metadata_vector,
+                               array_cosine_distance(e.vector, {vector_str}::FLOAT[{EMBEDDING_DIM}]) AS dist
+                        FROM embeddings e
+                        JOIN items i ON i.id = e.item_id
+                        LEFT JOIN item_embeddings ie ON ie.item_id = e.item_id
+                        ORDER BY array_cosine_distance(e.vector, {vector_str}::FLOAT[{EMBEDDING_DIM}])
+                        LIMIT {limit * 2}
+                    )
+                    SELECT t.item_id, c.body AS snippet, 
+                           (1.0 - t.dist) AS chunk_score,
+                           CASE WHEN t.metadata_vector IS NOT NULL 
+                                THEN (1.0 - array_cosine_distance(t.metadata_vector, {vector_str}::FLOAT[{EMBEDDING_DIM}])) 
+                                ELSE 0.0 END AS meta_score,
+                           {
+                               f"CASE WHEN t.metadata_vector IS NOT NULL THEN (1.0 - array_cosine_distance(t.metadata_vector, {session_vector_str}::FLOAT[{EMBEDDING_DIM}])) ELSE 0.0 END"
+                               if session_vector_str else "0.0"
+                           } AS session_score
+                    FROM top_embeddings t
+                    JOIN content c ON c.id = t.content_id
+                    """
+                ).fetchall()
+            else:
+                semantic_rows = con.execute(
                 f"""
                 WITH filtered_embeddings AS (
                     SELECT e.item_id, e.content_id, e.vector, ie.metadata_vector
@@ -173,32 +175,32 @@ def search(query: str, limit: int = 10, use_enrichment: bool = True) -> list[dic
                 JOIN content c ON c.id = t.content_id
                 """, params
             ).fetchall()
-    except Exception as e:
-        logging.warning(f"Semantic search failed with filter '{sql_filter}': {e}. Falling back.")
-        semantic_rows = con.execute(
-            f"""
-            WITH top_embeddings AS (
-                SELECT e.item_id, e.content_id, ie.metadata_vector,
-                       array_cosine_distance(e.vector, {vector_str}::FLOAT[{EMBEDDING_DIM}]) AS dist
-                FROM embeddings e
-                JOIN items i ON i.id = e.item_id
-                LEFT JOIN item_embeddings ie ON ie.item_id = e.item_id
-                ORDER BY array_cosine_distance(e.vector, {vector_str}::FLOAT[{EMBEDDING_DIM}])
-                LIMIT {limit * 2}
-            )
-            SELECT t.item_id, c.body AS snippet, 
-                   (1.0 - t.dist) AS chunk_score,
-                   CASE WHEN t.metadata_vector IS NOT NULL 
-                        THEN (1.0 - array_cosine_distance(t.metadata_vector, {vector_str}::FLOAT[{EMBEDDING_DIM}])) 
-                        ELSE 0.0 END AS meta_score,
-                   {
-                       f"CASE WHEN t.metadata_vector IS NOT NULL THEN (1.0 - array_cosine_distance(t.metadata_vector, {session_vector_str}::FLOAT[{EMBEDDING_DIM}])) ELSE 0.0 END"
-                       if session_vector_str else "0.0"
-                   } AS session_score
-            FROM top_embeddings t
-            JOIN content c ON c.id = t.content_id
-            """
-        ).fetchall()
+        except Exception as e:
+            logging.warning(f"Semantic search failed with filter '{sql_filter}': {e}. Falling back.")
+            semantic_rows = con.execute(
+                f"""
+                WITH top_embeddings AS (
+                    SELECT e.item_id, e.content_id, ie.metadata_vector,
+                           array_cosine_distance(e.vector, {vector_str}::FLOAT[{EMBEDDING_DIM}]) AS dist
+                    FROM embeddings e
+                    JOIN items i ON i.id = e.item_id
+                    LEFT JOIN item_embeddings ie ON ie.item_id = e.item_id
+                    ORDER BY array_cosine_distance(e.vector, {vector_str}::FLOAT[{EMBEDDING_DIM}])
+                    LIMIT {limit * 2}
+                )
+                SELECT t.item_id, c.body AS snippet, 
+                       (1.0 - t.dist) AS chunk_score,
+                       CASE WHEN t.metadata_vector IS NOT NULL 
+                            THEN (1.0 - array_cosine_distance(t.metadata_vector, {vector_str}::FLOAT[{EMBEDDING_DIM}])) 
+                            ELSE 0.0 END AS meta_score,
+                       {
+                           f"CASE WHEN t.metadata_vector IS NOT NULL THEN (1.0 - array_cosine_distance(t.metadata_vector, {session_vector_str}::FLOAT[{EMBEDDING_DIM}])) ELSE 0.0 END"
+                           if session_vector_str else "0.0"
+                       } AS session_score
+                FROM top_embeddings t
+                JOIN content c ON c.id = t.content_id
+                """
+            ).fetchall()
 
     # ── 3. Lexical Search (FTS / BM25) ───────────────────────────────
     safe_query = lexical_query.replace("'", "''")

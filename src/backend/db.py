@@ -137,10 +137,15 @@ def init_schema(con: duckdb.DuckDBPyConnection) -> None:
     """)
 
 
-def create_hnsw_index(con: duckdb.DuckDBPyConnection | None = None) -> None:
+def create_hnsw_index(con: duckdb.DuckDBPyConnection | None = None, force_rebuild: bool = False) -> None:
     """Create the HNSW index on embeddings."""
     if con is None:
         con = get_connection()
+    if force_rebuild:
+        try:
+            con.execute("DROP INDEX IF EXISTS emb_idx;")
+        except Exception:
+            pass
     try:
         con.execute(
             "CREATE INDEX IF NOT EXISTS emb_idx "
@@ -199,13 +204,24 @@ def insert_content(item_id: int, chunk_index: int, body: str) -> int:
 
 
 def insert_embedding(content_id: int, item_id: int, vector: list[float]) -> int:
-    """Insert an embedding and return its id."""
+    """Insert an embedding and return its id. Includes self-healing for HNSW index corruption."""
     con = get_connection()
-    result = con.execute(
-        "INSERT INTO embeddings (content_id, item_id, vector) VALUES (?, ?, ?) RETURNING id;",
-        [content_id, item_id, vector],
-    ).fetchone()
-    return result[0]
+    try:
+        result = con.execute(
+            "INSERT INTO embeddings (content_id, item_id, vector) VALUES (?, ?, ?) RETURNING id;",
+            [content_id, item_id, vector],
+        ).fetchone()
+        return result[0]
+    except Exception as e:
+        if "Duplicate keys" in str(e) or "HNSW" in str(e) or "Constraint Error" in str(e):
+            print("Detected HNSW index corruption during insertion. Auto-rebuilding index and retrying...")
+            create_hnsw_index(con, force_rebuild=True)
+            result = con.execute(
+                "INSERT INTO embeddings (content_id, item_id, vector) VALUES (?, ?, ?) RETURNING id;",
+                [content_id, item_id, vector],
+            ).fetchone()
+            return result[0]
+        raise e
 
 def insert_chunk_metadata(content_id: int, meta: dict) -> None:
     """Insert JSON metadata parsed from LLM for a specific chunk."""
@@ -267,6 +283,27 @@ def update_item_enrichment(item_id: int, title: str, tags: str, summary: str, me
         [title, tags, summary, item_id],
     )
 
+def add_tag_to_item(item_id: int, new_tag: str) -> bool:
+    """Append a tag to an item's tags column."""
+    con = get_connection()
+    try:
+        item = get_item(item_id)
+        if not item:
+            return False
+            
+        current_tags = item.get("tags") or ""
+        tag_list = [t.strip() for t in current_tags.split(",") if t.strip()]
+        if new_tag not in tag_list:
+            tag_list.append(new_tag)
+            
+        new_tags_str = ", ".join(tag_list)
+        con.execute("UPDATE items SET tags = ? WHERE id = ?;", [new_tags_str, item_id])
+        return True
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return False
+
 def delete_item(item_id: int) -> bool:
     """Delete an item and all its associated data from the database."""
     con = get_connection()
@@ -291,7 +328,7 @@ def delete_item(item_id: int) -> bool:
         
         # Rebuild indexes since content was removed
         if deleted:
-            create_hnsw_index(con)
+            create_hnsw_index(con, force_rebuild=True)
             create_fts_index(con)
             
         return deleted

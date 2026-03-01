@@ -24,12 +24,13 @@ const API_BASE = "http://localhost:8000";
 
 export const vaultApi = {
     /**
-     * Search documents using hybrid search (natural language)
+     * Search documents using hybrid search (natural language) or strict exact matches
      */
-    search: async (query: string): Promise<DocumentResult[]> => {
+    search: async (query: string, strict: boolean = false): Promise<DocumentResult[]> => {
         if (!query.trim()) return [];
 
-        const response = await fetch(`${API_BASE}/search?q=${encodeURIComponent(query)}`);
+        const endpoint = `${API_BASE}/search?q=${encodeURIComponent(query)}${strict ? '&strict=true' : ''}`;
+        const response = await fetch(endpoint);
         if (!response.ok) {
             const err = await response.json().catch(() => ({}));
             throw new Error(err.detail || `Search failed: ${response.statusText}`);
@@ -83,6 +84,42 @@ export const vaultApi = {
         if (!response.ok) {
             const err = await response.json().catch(() => ({}));
             throw new Error(err.detail || `Delete failed: ${response.statusText}`);
+        }
+
+        return response.json();
+    },
+
+    /**
+     * Ingest a webpage by URL
+     */
+    ingestUrl: async (url: string): Promise<IngestResponse> => {
+        const response = await fetch(`${API_BASE}/ingest/url`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url })
+        });
+
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.detail || `URL Ingest failed: ${response.statusText}`);
+        }
+
+        return response.json();
+    },
+
+    /**
+     * Add a tag to a document
+     */
+    addTag: async (id: string, tag: string): Promise<{ success: boolean; message: string }> => {
+        const response = await fetch(`${API_BASE}/document/${encodeURIComponent(id)}/tags`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tag })
+        });
+
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.detail || `Add tag failed: ${response.statusText}`);
         }
 
         return response.json();
