@@ -13,3 +13,5 @@ Pillow
 easyocr
 vosk
 imageio-ffmpeg
+pdfplumber
+yt-dlp
