@@ -10,6 +10,31 @@
     "lint": "eslint .",
     "preview": "vite preview"
   },
+  "build": {
+    "appId": "com.blackvault.app",
+    "productName": "BlackVault",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "extraResources": [
+      {
+        "from": "../dist/api",
+        "to": "api",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "files": [
+      "dist-electron/**/*",
+      "dist/**/*"
+    ]
+  },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.1",
     "clsx": "^2.1.1",

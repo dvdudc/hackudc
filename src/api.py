@@ -14,7 +14,14 @@ from backend.search import search as search_docs
 from backend.db import get_item, get_chunks_for_item, delete_item, add_tag_to_item
 from backend.connections import get_connections
 
-VAULT_DIR = Path("blackvault_data/files").resolve()
+import sys
+
+if getattr(sys, 'frozen', False):
+    application_path = Path(sys.executable).parent
+else:
+    application_path = Path(__file__).resolve().parent.parent
+
+VAULT_DIR = (application_path / "blackvault_data" / "files").resolve()
 VAULT_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="Black Vault API")

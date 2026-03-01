@@ -1,68 +1,52 @@
-# Black Vault - Frontend & Shortcuts
+# Black Vault 🕳️ - Documentación de Usuario y Arquitectura
 
-Este documento explica cómo configurar el frontend de **Black Vault**, su arquitectura UI, los comandos CLI integrados, y los atajos de teclado globales.
+Bienvenido a Black Vault. Esta versión ha sido diseñada específicamente para funcionar en un entorno distribuido mediante VPN, manteniendo los ordenadores de los clientes ligeros mientras el procesamiento de Inteligencia Artificial pesado ocurre en el servidor remoto.
 
----
+## 🏗 Arquitectura de Distribución (Opción 1 - Portable)
 
-## 🛠 Instalación y Configuración
+Black Vault se compone de dos piezas que funcionan en sincronía:
+1. **El Cerebro (Backend Python)**: Escrito en FastAPI, se encarga de gestionar la base de datos vectorial local (DuckDB), leer PDFs/Imágenes, y redirigir las peticiones de razonamiento pesado hacia el modelo LLM remoto (`10.8.0.3:11434`).
+2. **El Widget (Frontend Electron)**: Una interfaz transparente construida en React + Vite que actúa como un agujero negro flotante en Windows.
 
-El frontend de Black Vault está construido con **React (Vite)** y empaquetado como aplicación de escritorio usando **Electron**.
+### 💿 Guía de Instalación para el Equipo
+No necesitas instalar entornos complejos, solo seguir estos pasos:
 
-### Requisitos Previos
-1. **Node.js** (recomendado v18+)
-2. **NPM** o Yarn.
-3. Asegurarte de que el backend de Python (`src/api.py`) tiene sus dependencias resueltas (`pip install -r src/requirements.txt`).
+1. **Requisito Previos**: 
+   - Estar conectado a la VPN del equipo (IP del servidor IA: `10.8.0.3`).
+   - Tener instalado **Python 3.10 o superior** en Windows.
+   - Poner la carpeta distribuida `hackudc` en cualquier lado de tu PC (ej: `Escritorio`).
 
-### Arrancar la Aplicación
-Navega a la carpeta principal `web/` en la terminal:
-
-```bash
-cd web
-
-# 1. Instalar dependencias
-npm install
-
-# 2. Iniciar en modo desarrollo
-npm run dev
-```
-Al lanzar `npm run dev`, Electron automáticamente levantará el servidor de Backend (`api.py`) utilizando el ejecutable en `.venv`.
+2. **Primer Inicio**:
+   - Haz doble clic en el archivo `blackvault_run.bat`.
+   - **Nota**: La primera vez tardará un rato. El sistema detectará automáticamente tu instalación de Python, fabricará un entorno virtual aislado (`.venv`), e instalará en secreto todas las dependencias ML gigantes (LangChain, DuckDB, FastAPI).
+   
+3. **Uso Diario**:
+   - Una vez instaladas las dependencias, las siguientes veces que ejecutes `blackvault_run.bat` será instantáneo. Abrirá un fondo transparente y verás el Agujero Negro en la esquina inferior derecha.
 
 ---
 
-## 🚀 Arquitectura UI: El Agujero Negro
+## ⌨️ Atajos de Teclado Globales (PowerToys)
 
-La aplicación funciona como un **Widget Transparente ("Power Toy")**. No ocupa espacio sólido en la pantalla ni aparece maximizada de primeras.
+Black Vault vive en segundo plano. Puedes llamarlo desde cualquier programa en Windows (Word, Navegador, etc) usando estos atajos maestros:
 
-- **Modo Colapsado**: Solo se muestra el widget circular del "Agujero Negro" flotando encima del resto de ventanas, anclado a la esquina inferior derecha.
-- **Modo Expandido**: Al interactuar, la aplicación se despliega hacia la izquierda revelando el panel de resultados de la Búsqueda y Detalles del documento.
+- `Ctrl + Shift + Espacio`: **Invocar Comando rápido**. Expande el agujero negro y abre instantáneamente la barra de texto superior lista para que escribas un comando. Si vuelves a pulsarlo, se esconde la interfaz.
+- `Ctrl + Shift + B`: **Pánico / Modo Invisible**. Oculta o Muestra absolutamente todo el widget de Black Vault de la pantalla inmediatamente.
 
----
-
-## ⚡ Comandos CLI
-
-El buscador principal no solo busca texto tradicional (búsqueda semántica), sino que actúa como una consola de comandos `CLI` súper potente. 
-
-Pulsando sobre los atajos debajo de la caja grande, o tecleando directamente en el widget transparente, puedes ejecutar:
-
-| Comando | Acción | Ejemplo de Uso |
-| --- | --- | --- |
-| `>n` | Crea una nota rápida `.txt` automáticamente en el Vault | `>n Esto es una idea importante` |
-| `>url` | Descarga, lee, escrapea y guarda el contenido de texto de una web | `>url https://es.wikipedia.org/wiki/React` |
-| `>tag` | Añade una etiqueta dinámica a un documento en la DB | `>tag 45 important` |
-| `>rm` | Borra un documento del Vault (tanto DB como archivo local) | `>rm 45` |
-| `>s` | Fuerza una búsqueda exacta (BM25) esquivando la búsqueda semántica | `>s Python` |
-
-*Nota: Los comandos de gestión (`>n`, `>url`, `>tag`, `>rm`) se ejecutan en segundo plano. La interfaz **no** se desplegará interrumpiendo lo que estés haciendo.*
+Estos atajos funcionan a nivel de sistema operativo aunque el foco del ratón esté en otra ventana.
 
 ---
 
-## ⌨️ Atajos de Teclado Globales
+## ⚡ Comandos del TextBox
 
-Black Vault funciona en el fondo como un asistente omnisciente. Puedes llamarlo desde cualquier programa de Windows usando estos teclados globales:
+Al pulsar en el Agujero Negro, o usar `Ctrl+Shift+Espacio`, se abrirá el cuadro de entrada de comandos y búsquedas. Funciona con estos prefijos:
 
-| Atajo | Función |
-| --- | --- |
-| **`Ctrl + Shift + B`** | **Ocultar / Mostrar Widget**: Hace desaparecer completamente el Agujero Negro si te está molestando visualmente en pantalla, y lo vuelve a invocar cuando lo necesites. |
-| **`Ctrl + Shift + Espacio`** | **Búsqueda Relámpago**: Fuerza la apertura expandida del widget y pone el foco del teclado inmediatamente en la barra de búsqueda principal. Magia pura para buscar rápido. |
+| Comando | Acción | Ejemplo |
+| :--- | :--- | :--- |
+| *(Normal)* | Búsqueda Semántica Vectorial con IA. | `¿Quién es el asesino en el caso 4?` |
+| `>s ` | Búsqueda Estricta de Texo (Exact Match). | `>s matríciula 1234-ABC` |
+| `>n ` | Crea una nota rápida. El título será automático (Fecha y Hora). | `>n No olvidar revisar la coartada de Juan.` |
+| `>url ` | Lee la web oculta en la URL, extrae el texto y lo memoriza en la BBDD. | `>url https://es.wikipedia.org/wiki/Misterio` |
+| `>rm ` | Borra permanentemente un fragmento / nota por su identificador. | `>rm d61f-450f-a35f` |
+| `>tag ` | Añade una etiqueta rápida a un ID existente. | `>tag d61f-450f-a35f importante` |
 
-(En macOS, utiliza `Cmd` en lugar de `Ctrl`).
+Cualquier archivo de texto, imagen, o PDF puede ser ingerido simplemente **arrastrándolo encima del agujero negro**. Además, un botón con el icono de 📋 en el menú intermedio te permite **pegar texto directamente desde el portapapeles**.
