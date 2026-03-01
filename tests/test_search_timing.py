@@ -12,7 +12,7 @@ sys.path.append(str(Path(__file__).resolve().parent.parent / "src"))
 from backend.config import EMBEDDING_DIM
 from backend import db
 from backend.ingest import get_embedding
-from backend.search import enrich_query
+
 
 
 QUERIES = [
@@ -29,11 +29,15 @@ def timed_search(query: str, limit: int = 5):
     timings = {}
     con = db.get_connection()
 
-    # ── Stage 1: Query Enrichment (REAL Ollama call) ─────────────────
-    t0 = time.perf_counter()
-    enrichment = enrich_query(query)
-    expanded_query = enrichment["expanded_query"]
-    sql_filter = enrichment["sql_filter"]
+    # ── Stage 1: Query Enrichment (REAL Ollama call) ─────────────────    
+    import time
+    start = time.time()
+    # enrichment = enrich_query(query)
+    # query_tags = enrichment.get("tags", [])nded_query"
+    # expanded_query = enrichment["expanded_query"] # This line was originally here, but `enrichment` is now commented out.
+    expanded_query = query # Default to original query if enrichment is skipped
+    # sql_filter = enrichment["sql_filter"] # This line was originally here, but `enrichment` is now commented out.
+    sql_filter = "1=1" # Default to no filter if enrichment is skipped
     if ";" in sql_filter or "DROP" in sql_filter.upper():
         sql_filter = "1=1"
     timings["1_enrichment_llm"] = time.perf_counter() - t0

@@ -5,11 +5,9 @@ python-dotenv
 typer[all]
 numpy
 rich
-pytest
 fastapi
 uvicorn
 python-multipart
-Pillow
 easyocr
 vosk
 imageio-ffmpeg
