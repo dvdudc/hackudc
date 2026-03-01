@@ -47,11 +47,19 @@ def get_embedding(text: str) -> list[float]:
 def get_embeddings_batch(texts: list[str]) -> list[list[float]]:
     if not texts:
         return []
-    result = get_client().models.embed_content(
-        model=EMBEDDING_MODEL,
-        contents=texts,
-    )
-    return [list(e.values) for e in result.embeddings]
+        
+    all_embeddings = []
+    batch_size = 100
+    
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i:i + batch_size]
+        result = get_client().models.embed_content(
+            model=EMBEDDING_MODEL,
+            contents=batch,
+        )
+        all_embeddings.extend([list(e.values) for e in result.embeddings])
+        
+    return all_embeddings
 
 
 def detect_mime(path: str) -> str:
