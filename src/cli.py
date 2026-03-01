@@ -20,6 +20,7 @@ import sys
 import io
 import logging
 from pathlib import Path
+#import pytube
 
 import typer
 from rich.console import Console
@@ -40,60 +41,99 @@ console = Console()
 
 @app.command()
 def ingest(
-    file: str = typer.Argument(..., help="Path to a text file to ingest."),
+    source: str = typer.Argument(..., help="Path to a text file OR a YouTube URL."),
 ):
-    """Ingest a text file into the vault."""
-    # MODIFICA ESTA LÍNEA PARA IMPORTAR TAMBIÉN DuplicateError
-    from backend.ingest import ingest_file, DuplicateError 
+    """Ingest a text file or YouTube video into the vault."""
+    from backend.ingest import ingest_file, DuplicateError
+    import re
+    
+    # ── Detectar si es URL de YouTube ───────────────────────────────
+    def is_youtube_url(text: str) -> bool:
+        pattern = r'(https?://)?(www\.)?(youtube\.com|youtu\.be)/.+'
+        return bool(re.match(pattern, text, re.IGNORECASE))
 
-    filepath = Path(file).resolve()
-    if not filepath.exists():
-        console.print(f"[red]❌ File not found:[/red] {filepath}")
-        raise typer.Exit(code=1)
+    # ── Lógica principal ───────────────────────────────────────────
+    if is_youtube_url(source):
+        from backend.youtube import get_video_info
+        import re
 
-    try:
-        logging.info(f"Ingesting file: {filepath}")
+        parsed_text = get_video_info(source)
+
+        match = re.search(r"ID\s+:\s+(\S+)", parsed_text)
+        video_id = match.group(1) if match else "unknown"
         
-        import mimetypes
-        mime, _ = mimetypes.guess_type(str(filepath))
-        mime = mime or "application/octet-stream"
-        
-        if mime.startswith("image/"):
-            from backend.ocr import extract_text_from_image
-            parsed_text = extract_text_from_image(str(filepath))
-        else:
-            try:
-                parsed_text = filepath.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                raise ValueError("File encoding error. Must be UTF-8.")
-                
-        item_id = ingest_file(str(filepath), parsed_text)
-        logging.info(f"Successfully ingested item #{item_id}")
-        console.print(
-            Panel(
-                f"[green]Item #{item_id}[/green] stored successfully.\n"
-                f"Source: {filepath}",
-                title="✅ Ingested",
-                border_style="green",
+        youtube_dir = Path("youtube_videos")
+        youtube_dir.mkdir(exist_ok=True)
+        file_path = youtube_dir / f"yt_{video_id}.txt"
+
+        try:
+            file_path.write_text(parsed_text, encoding="utf-8")
+            item_id = ingest_file(str(file_path), parsed_text)
+            console.print(
+                Panel(
+                    f"[green]Item #{item_id}[/green] stored successfully.\n"
+                    f"Source: {source}",
+                    title="✅ YouTube Ingested",
+                    border_style="green",
+                )
             )
-        )
-        
-    except DuplicateError as e:
-        # Ahora sí funcionará este bloque
-        console.print(
-            Panel(
-                f"[yellow]Item #{e.existing_id}[/yellow] already exists.\n"
-                f"Skipping ingestion to save resources.\n"
-                f"Source: {filepath}",
-                title="⚠️  Duplicate Detected",
-                border_style="yellow",
+        except DuplicateError as e:
+            console.print(
+                Panel(
+                    f"[yellow]Item #{e.existing_id}[/yellow] already exists.\n"
+                    f"Skipping ingestion.\nSource: {source}",
+                    title="⚠️  Duplicate Detected",
+                    border_style="yellow",
+                )
             )
-        )
-        # No hacemos exit(1) para no marcarlo como error fatal
-        
-    except ValueError as e:
-        console.print(f"[red]❌ {e}[/red]")
-        raise typer.Exit(code=1)
+            
+    else:
+        # 📁 Es archivo local
+        filepath = Path(source).resolve()
+        if not filepath.exists():
+            console.print(f"[red]❌ File not found:[/red] {filepath}")
+            raise typer.Exit(code=1)
+
+        try:
+            logging.info(f"Ingesting file: {filepath}")
+            
+            import mimetypes
+            mime, _ = mimetypes.guess_type(str(filepath))
+            mime = mime or "application/octet-stream"
+            
+            if mime.startswith("image/"):
+                from backend.ocr import extract_text_from_image
+                parsed_text = extract_text_from_image(str(filepath))
+            else:
+                try:
+                    parsed_text = filepath.read_text(encoding="utf-8")
+                except UnicodeDecodeError:
+                    raise ValueError("File encoding error. Must be UTF-8.")
+                    
+            item_id = ingest_file(str(filepath), parsed_text)
+            logging.info(f"Successfully ingested item #{item_id}")
+            console.print(
+                Panel(
+                    f"[green]Item #{item_id}[/green] stored successfully.\n"
+                    f"Source: {filepath}",
+                    title="✅ Ingested",
+                    border_style="green",
+                )
+            )
+            
+        except DuplicateError as e:
+            console.print(
+                Panel(
+                    f"[yellow]Item #{e.existing_id}[/yellow] already exists.\n"
+                    f"Skipping ingestion to save resources.\n"
+                    f"Source: {filepath}",
+                    title="⚠️  Duplicate Detected",
+                    border_style="yellow",
+                )
+            )
+        except ValueError as e:
+            console.print(f"[red]❌ {e}[/red]")
+            raise typer.Exit(code=1)
 
 
 @app.command()
