@@ -266,6 +266,21 @@ def show(
         console.print("[dim]No related items found.[/dim]")
 
 
+@app.command(name="consolidate")
+def consolidate():
+    """Consolidate small similar notes into single documents."""
+    from backend.consolidate import run_consolidation
+    console.print("Starting note consolidation...")
+    results = run_consolidation()
+    if not results:
+        console.print("[yellow]No notes were consolidated.[/yellow]")
+        raise typer.Exit()
+        
+    for r in results:
+        console.print(f"✅ Created [green]'{r['title']}'[/green] (Item #{r['new_id']}) by merging {r['merged_count']} notes.")
+
+
+
 @app.command()
 def export(
     format: str = typer.Option("json", "--format", "-f", help="Export format: json or csv."),
